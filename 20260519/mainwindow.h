@@ -1,0 +1,122 @@
+#ifndef MAINWINDOW_H
+#define MAINWINDOW_H
+
+#include <QMainWindow>
+#include <QThread>
+#include <QInputDialog>
+#include <QHostAddress>
+#include <QNetworkInterface>
+#include <QMessageBox>
+#include <QLineEdit>
+#include <QRandomGenerator>
+#include <QTableWidgetItem>
+#include <QTabWidget>
+#include <QPlainTextEdit>
+#include <QRegularExpression>
+#include "clientnetworker.h"
+#include "servernetworker.h"
+#include "dcmanager.h"
+#include "tunmanager.h"
+#include "tuninworker.h"
+#include "tunoutworker.h"
+#include "ui_mainwindow.h"
+
+#define NET 0
+#define DC 1
+#define IN 2
+#define OUT 3
+
+bool inline checkIPv4(const QString & ipStr)
+{
+    if(ipStr.isEmpty())
+        return false;
+    QHostAddress ip;
+    if(ip.setAddress(ipStr)&&ip.protocol()==QAbstractSocket::IPv4Protocol)
+        return true;
+    else
+        return false;
+}
+
+class netConfig{
+public:
+    QString ip;int port;
+    netConfig():ip(),port(0){}
+    netConfig(const QString& IP,int PORT):ip(IP),port(PORT){}
+    netConfig(const netConfig& oldOne):ip(oldOne.ip),port(oldOne.port){}
+    bool isValid(){return checkIPv4(ip)&&(port>0&&port<65535);}
+};
+
+QT_BEGIN_NAMESPACE
+namespace Ui {
+class MainWindow;
+}
+QT_END_NAMESPACE
+
+class MainWindow : public QMainWindow
+{
+    Q_OBJECT
+
+public://MainTrd
+    tunloader* tunLoader{NULL};
+    tunmanager* tunManager{NULL};
+
+public://QThread
+    basenetworker* netWorker{NULL};
+    dcmanager* dcManager{NULL};
+    tuninworker* tunInWorker{NULL};
+    tunoutworker* tunOutWorker{NULL};
+    QThread* trd[4]{};
+
+public://Flags
+    bool isCoordinator;
+    QString localHostName;
+    bool isClosing{false};
+    int currentPeerHostNum{0};
+
+public://Sources
+    WINTUN_ADAPTER_HANDLE adapter{NULL};
+    WINTUN_SESSION_HANDLE session{NULL};
+    std::vector<rtc::binary> inboundBuffer;
+    QMutex* mutex;
+    netConfig currentNetConf;
+    QHash<int, QString> peerNames;
+
+public:
+    MainWindow(QWidget *parent = nullptr);
+    ~MainWindow();;
+    void initialUI();
+    bool requestDialog(const QString&,const QString&,const QString&,const QString&);
+
+public://uiGetterFunc
+    netConfig getCoordinateNetConfigFromUI();
+    netConfig getPeerNetConfigFromUI();
+
+public://softwareFunc
+    void closeEvent(QCloseEvent*);
+    void cleanUp(bool isShutDown);
+    void releaseTunResource();
+
+public://workerFunc
+    void initialSignaling();
+    void initialTun();void getTun();void startTunWorker();
+
+public slots:
+    void goSendMsg();
+    void onPeerAdded(int peerHostNum, const QString& peerHostName);
+    void onPeerRemoved(int peerHostNum, const QString& peerHostName);
+    void onPeerMsgReceived(int peerHostNum, const QString& peerName, const QString& msg);
+    void goSendUnicastMsg();
+    void goSendBroadcastMsg();
+    void onPeerTableClicked(QTableWidgetItem* item);
+    void onChatTabChanged(int index);
+
+private:
+    Ui::MainWindow *ui;
+
+signals:
+    void initialTcpServer(const QString&,int);
+    void initialTcpClient(const QString&,int);
+    void startVPN();
+};
+
+#endif // MAINWINDOW_H
