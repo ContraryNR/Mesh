@@ -13,13 +13,24 @@
 #include <QTabWidget>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
+#include <QListWidget>
+#include <QLabel>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFileDialog>
+#include <QFile>
+#include <QFrame>
+#include <QTime>
 #include "clientnetworker.h"
 #include "servernetworker.h"
 #include "dcmanager.h"
+#include "tunloader.h"
 #include "tunmanager.h"
 #include "tuninworker.h"
 #include "tunoutworker.h"
 #include "ui_mainwindow.h"
+#include "filesender.h"
 
 #define NET 0
 #define DC 1
@@ -72,6 +83,7 @@ public://Flags
     QString localHostName;
     bool isClosing{false};
     int currentPeerHostNum{0};
+    int currentRow{-1};
 
 public://Sources
     WINTUN_ADAPTER_HANDLE adapter{NULL};
@@ -80,6 +92,7 @@ public://Sources
     QMutex* mutex;
     netConfig currentNetConf;
     QHash<int, QString> peerNames;
+    QHash<int, QStringList> peerChatHistory;
 
 public:
     MainWindow(QWidget *parent = nullptr);
@@ -98,17 +111,21 @@ public://softwareFunc
 
 public://workerFunc
     void initialSignaling();
-    void initialTun();void getTun();void startTunWorker();
+    void initialTun();void getTun();void startTun();
 
 public slots:
-    void goSendMsg();
     void onPeerAdded(int peerHostNum, const QString& peerHostName);
-    void onPeerRemoved(int peerHostNum, const QString& peerHostName);
-    void onPeerMsgReceived(int peerHostNum, const QString& peerName, const QString& msg);
+    void onPeerRemoved(int peerHostNum);
+    void onPeerMsgReceived(int peerHostNum,const QString& msg);
     void goSendUnicastMsg();
     void goSendBroadcastMsg();
     void onPeerTableClicked(QTableWidgetItem* item);
-    void onChatTabChanged(int index);
+    void onAttachFile();
+
+private:
+    void addChatBubble(QListWidget* listWidget, const QString& text, bool isSelf, bool isBroadcast);
+    void reloadChatHistory();
+    QString getCurrentPeerName();
 
 private:
     Ui::MainWindow *ui;

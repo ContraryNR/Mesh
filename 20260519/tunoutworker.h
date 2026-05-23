@@ -15,23 +15,8 @@ class tunoutworker : public QObject
 public:
     tunloader* functionLoader{NULL};
     std::atomic<bool> sessionRunning=false;
-    QTimer* sendSpeedTimer{NULL};
-    std::atomic<int> externalSpeed=0,floodFinish;
-    tunoutworker(tunloader* loader):functionLoader(loader)
-    {
-        if(!sendSpeedTimer)
-        {
-            sendSpeedTimer=new QTimer(this);
-            sendSpeedTimer->setInterval(1000);
-            connect(sendSpeedTimer,&QTimer::timeout,this,[this](){
-                emit sendExternelSpeed(externalSpeed);
-                externalSpeed=0;
-            });
-        }
-    }
-
-signals:
-    void sendExternelSpeed(int);
+    std::atomic<bool> floodFinish=false;
+    tunoutworker(tunloader* loader):functionLoader(loader){}
 
 public slots:
     void startExternalSessionFlood(void* voidSession,void* voidRoute)
@@ -39,7 +24,6 @@ public slots:
         floodFinish=false;
         WINTUN_SESSION_HANDLE session=(WINTUN_SESSION_HANDLE)voidSession;
         QHash<int, dcworker*>* route=(QHash<int, dcworker*>*)voidRoute;
-        sendSpeedTimer->start();
         HANDLE readEvent = functionLoader->GetReadWaitEvent(session);
         while (sessionRunning.ld)
         {
@@ -57,13 +41,21 @@ public slots:
                     uint32_t dstAddr;
                     std::memcpy(&dstAddr, packet + 16, sizeof(uint32_t));
                     int hostNum = ntohl(dstAddr) & 0xFF;
-                    dcworker* target = route->value(hostNum, nullptr);
-                    if (target && target->dc && target->dc->isOpen())
+                    dcworker* worker = route->value(hostNum, nullptr);
+                    if (worker && worker->dc && worker->dc->isOpen())
                     {
                         try
                         {
-                            target->dc->send(reinterpret_cast<const rtc::byte*>(packet),packetSize);
-                            externalSpeed += packetSize;
+                            //(1)先构造装载binaryMsg的byeArr
+                            QByteArray msg(reinterpret_cast<const char*>(packet),packetSize);
+                            uint8_t flag=0x00;//从连续的byte内存构造byteArr->头插标志位=>两步得到拼装串
+                            msg.push_front(flag);
+                            //(2)立即释放对应出站packet(的内存)并尝试获取下个packet*
+                            functionLoader->ReleaseReceivePacket(session, packet);
+                            packet = functionLoader->ReceivePacket(session, &packetSize);
+                            worker->newEventNow=true;//通知QTimer中断处理积压数据包
+                            //(3)根据packet*是否非空判断出(极)短时间内是否还有下个packet待invoke异步投递发送事件
+                            QMetaObject::invokeMethod(worker,"sendBinaryMsg",Qt::QueuedConnection,Q_ARG(const QByteArray&,msg),Q_ARG(bool,packet!=nullptr));//为避免'严格'类型匹配意外故这里加上'非空判断'
                         }
                         catch (const std::exception& e)
                         {
@@ -71,11 +63,8 @@ public slots:
                         }
                     }
                 }
-                functionLoader->ReleaseReceivePacket(session, packet);
-                packet = functionLoader->ReceivePacket(session, &packetSize);
             }
         }
-        sendSpeedTimer->stop();
         floodFinish=true;
     }
 };

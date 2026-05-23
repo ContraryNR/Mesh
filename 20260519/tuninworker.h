@@ -13,14 +13,14 @@ class tuninworker : public QObject
 public:
     tunloader* functionLoader{NULL};
     std::vector<rtc::binary>& inboundBuffer;
-    QMutex* mutex{NULL};
+    QMutex* inboundBufferMutex{NULL};
     QTimer* readTimer{NULL};
-    tuninworker(WINTUN_SESSION_HANDLE session,tunloader* loader,std::vector<rtc::binary>& inBuffer,QMutex* mtx):functionLoader(loader),inboundBuffer(inBuffer),mutex(mtx)
+    tuninworker(WINTUN_SESSION_HANDLE session,tunloader* loader,std::vector<rtc::binary>& inBuffer,QMutex* mtx):functionLoader(loader),inboundBuffer(inBuffer),inboundBufferMutex(mtx)
     {
         readTimer=new QTimer(this);
         readTimer->setInterval(100);
         connect(readTimer,&QTimer::timeout,this,[this,session](){
-            QMutexLocker locker(mutex);
+            QMutexLocker locker(inboundBufferMutex);
             if(!inboundBuffer.empty())
                 for(std::vector<std::byte> data:inboundBuffer)
                 {

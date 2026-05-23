@@ -15,6 +15,7 @@ public:
     QHash<int,dcworker*> ipRoute;
     std::vector<rtc::binary>& inboundBuffer;
     std::atomic<int> inboundSpeed=0;
+    std::atomic<int> outboundSpeed=0;
     QTimer* sendSpeedTimer{NULL};
     QMutex* mutex{NULL};
     dcmanager(std::vector<rtc::binary>& inBuffer,QMutex* mtx):inboundBuffer(inBuffer),mutex(mtx)
@@ -24,9 +25,11 @@ public:
         connect(sendSpeedTimer,&QTimer::timeout,this,[this](){
             emit sendInboundSpeed(inboundSpeed);
             inboundSpeed=0;
+            emit sendOutboundSpeed(outboundSpeed);
+            outboundSpeed=0;
         });
     }
-public:
+public://basicFunc
     dcworker* addPeer(const QString& peerHostName,int peerHostNum,bool isOfferER)
     {
         nameRoute.insert(peerHostNum,peerHostName);
@@ -35,6 +38,7 @@ public:
 
         connect(worker,&dcworker::transferMsg,this,&dcmanager::transferMsg);
         connect(worker, &dcworker::sendInboundSpeed, this, &dcmanager::addInboundSpeed);
+        connect(worker, &dcworker::sendOutboundSpeed, this, &dcmanager::addOutboundSpeed);
         connect(worker, &dcworker::receiveStringMsg, this, &dcmanager::receivePeerMsg);
 
         QThread* trd=new QThread;
@@ -57,7 +61,7 @@ public:
         emit peerAdded(peerHostNum, peerHostName);
         return worker;
     }
-public slots:
+public slots://workerFunc
     void createOfferER(const QJsonArray& hostNameList,const QJsonArray& hostNumList)
     {
         int peerHostNum;
@@ -86,33 +90,47 @@ public slots:
             QMetaObject::invokeMethod(worker,"setRemoteSdp",Qt::QueuedConnection,Q_ARG(const QString&,sdp),Q_ARG(const QString&,"answer"));
     }
 
-public slots:
+public slots://(向内)链路聚合函数
     void transferMsg(const QJsonObject& msg)
-    {
-        emit sendMsg(msg);
-    }
+    {emit sendMsg(msg);}
     void addInboundSpeed(int ins)
-    {
-        inboundSpeed+=ins;
-    }
+    {inboundSpeed+=ins;}
+    void addOutboundSpeed(int outs)
+    {outboundSpeed+=outs;}
     void receivePeerMsg(int peerHostNum, const QString& msg)
-    {
-        QString peerName = nameRoute.value(peerHostNum, QString("未知"));
-        emit receiveStringMsg(peerHostNum, peerName, msg);
-    }
-    void broadcastMsg(const QString& msg)//附加广播slot
-    {
-        for (auto it = ipRoute.begin(); it != ipRoute.end(); ++it)
-            QMetaObject::invokeMethod(it.value(), "sendMsg", Qt::QueuedConnection,
-                                      Q_ARG(const QString&, msg));
-    }
-    void sendToPeer(int peerHostNum, const QString& msg)
+    {emit receiveStringMsg(peerHostNum, nameRoute.value(peerHostNum, QString("未知")), msg);}
+
+public slots://(向外)链路拆分函数
+    void sendStringToPeer(int peerHostNum, const QString& msg)
     {
         dcworker* worker = ipRoute.value(peerHostNum, nullptr);
         if (worker)
-            QMetaObject::invokeMethod(worker, "sendMsg", Qt::QueuedConnection,
+        {
+            worker->newEventNow=true;
+            QMetaObject::invokeMethod(worker, "sendStringMsg", Qt::QueuedConnection,
                                       Q_ARG(const QString&, msg));
+        }
     }
+    void sendByteArrayToPeer(int peerHostNum,const QByteArray& msg,bool predictNextEvent)
+    {
+        dcworker* worker = ipRoute.value(peerHostNum, nullptr);
+        if (worker)
+        {
+            worker->newEventNow=true;
+            QMetaObject::invokeMethod(worker, "sendBinaryMsg", Qt::QueuedConnection,
+                                      Q_ARG(const QByteArray&, msg),Q_ARG(bool,predictNextEvent));
+        }
+    }
+    void broadcastString(const QString& msg)
+    {
+        for (auto it = ipRoute.begin(); it != ipRoute.end(); ++it)
+        {
+            it.value()->newEventNow=true;
+            QMetaObject::invokeMethod(it.value(), "sendStringMsg", Qt::QueuedConnection,
+                                      Q_ARG(const QString&, msg));
+        }
+    }
+public slots://timerControlFunc
     void startTimer()
     {
         sendSpeedTimer->start();
@@ -129,6 +147,7 @@ public slots:
 signals:
     void sendMsg(const QJsonObject&);
     void sendInboundSpeed(int);
+    void sendOutboundSpeed(int);
     void peerAdded(int peerHostNum, const QString& peerHostName);
     void peerRemoved(int peerHostNum, const QString& peerHostName);
     void receiveStringMsg(int peerHostNum, const QString& peerName, const QString& msg);
