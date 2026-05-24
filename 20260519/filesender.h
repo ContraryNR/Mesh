@@ -5,7 +5,9 @@
 #include <QFileInfo>
 #include "dcmanager.h"
 
-#define chunkSize 25600//dc缓冲区占用达75%时至多剩下32KB 这里最多给到25KB确保不会溢出(缓冲区溢出时抛出异常)
+#define chunkSize 23592
+//busySize=104857 => remainSize=26214 =*0.9=>23592(23KB)(剩2.56KB)
+//确保dc缓冲区/就差一点(例如就差1b)达到busySize/时再进一个chunkPackage不会爆
 
 class filesender : public QObject
 {
@@ -20,15 +22,10 @@ public:
         
         QByteArray msg;
         msg.append(static_cast<char>(0x01));
-        
-        // 字节序转换：使用大端序发送
-        uint32_t beChunkIndex = qToBigEndian(chunkIndex);
-        uint32_t beChunkAmount = qToBigEndian(chunkAmount);
-        
-        msg.append(reinterpret_cast<const char*>(&beChunkIndex), sizeof(beChunkIndex));
-        msg.append(reinterpret_cast<const char*>(&beChunkAmount), sizeof(beChunkAmount));
+        msg.append(reinterpret_cast<const char*>(&chunkIndex), sizeof(chunkIndex));
+        msg.append(reinterpret_cast<const char*>(&chunkAmount), sizeof(chunkAmount));
         msg.append(static_cast<char>(fileNameLength));
-        msg.append(fileName.left(fileNameLength));  // 确保不超过指定长度
+        msg.append(fileName.left(fileNameLength));
         msg.append(data);
         return msg;
     }

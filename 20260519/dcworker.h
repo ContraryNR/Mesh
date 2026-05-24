@@ -17,7 +17,7 @@
 #include "filereceiver.h"
 
 //128*1024=131072
-#define busySize 98304//*0.75(96KB)=>若最后一个包过大可能导致意外塞满
+#define busySize 104857//*0.8(102KB)
 #define freeSize 32768//*0.25(32KB)=>若设置一个不够低的值可能很快又会达到busySize
 
 class dcworker : public QObject
@@ -113,37 +113,19 @@ public://toolFunction
                 uint32_t chunkIndex;
                 std::memcpy(&chunkIndex,bp,4);bp+=4;
                 uint32_t chunkAmount;
-                std::memcpy(&chunkAmount,bp,4);bp+=4;
-                
-                // 字节序转换：发送端用大端序，接收端也要用大端序解析
-                chunkIndex = qFromBigEndian(chunkIndex);
-                chunkAmount = qFromBigEndian(chunkAmount);
-                
+                std::memcpy(&chunkAmount,bp,4);bp+=4;                
                 uint8_t fileNameLength;
                 std::memcpy(&fileNameLength,bp,1);bp+=1;
+                std::byte* filename=(std::byte*)malloc(fileNameLength);
+                std::memcpy(filename,bp,fileNameLength);bp+=fileNameLength;
+                QString fileName=QString::fromUtf8((const char*)filename,fileNameLength);
+
+                // // 添加调试日志 - 显示文件名原始字节
+                // QByteArray fileNameBytes((const char*)filename,fileNameLength);
+                // qDebug() << "解析文件块:" << fileName << "块索引:" << chunkIndex << "总块数:" << chunkAmount
+                //          << "文件名长度:" << (int)fileNameLength << "文件名字节:" << fileNameBytes.toHex()
+                //          << "数据大小:" << (binaryMsg.size() - (bp - binaryMsg.data()));
                 
-                // 验证文件名长度的有效性
-                if(fileNameLength == 0 || fileNameLength > 255)
-                {
-                    qDebug() << "无效的文件名长度:" << fileNameLength;
-                    return;
-                }
-                
-                std::byte* filename=(std::byte*)malloc(fileNameLength + 1);  // +1 用于终止符
-                memcpy(filename,bp,fileNameLength);
-                //不支持int或char向byte的强转
-                // filename[fileNameLength] = '\0';  // 添加字符串终止符
-                memset(filename+fileNameLength,0,1);
-                bp+=fileNameLength;
-                QString fileName=QString::fromUtf8((const char*)filename);
-                free(filename);
-                
-                // 添加调试日志
-                qDebug() << "解析文件块:" << fileName << "块索引:" << chunkIndex << "总块数:" << chunkAmount
-                         << "文件名长度:" << (int)fileNameLength
-                         << "数据大小:" << (binaryMsg.size() - (bp - binaryMsg.data()));
-                
-                if(!fr)return;//防止出现fr异步初始化来不及的问题
                 emit goReceiveFile(fileName,chunkIndex,chunkAmount,QByteArray(
                 (const char*)bp,binaryMsg.size()-(bp-binaryMsg.data())));
                 free(filename);
