@@ -12,25 +12,23 @@ class filesender : public QObject
     Q_OBJECT
 public:
     QString filepath;
+    std::atomic<bool> running{false};
     filesender(const QString& file):filepath(file){}
 public:
-/*[type:1byte]=>uint8标识rtc::binary消息类型
-例如,其中0x00为来自wintun出站发送的消息,0x01为文件发送消息
-[index:4bytes]=>uint32标识本消息内’data块’的序号
-[totalChunks:4bytes]=>uint32标识本次传输(该文件)的总块数
-[fileNameLen:1byte]=>uint8(最大255)标识后面紧跟的fileName字节数
-[fileName:Nbytes]=>文件名可变字符串(0~255Bytes)
-[data]=>实际数据*/
-    QByteArray filePacker(uint32_t index,uint32_t chunkAmount,uint8_t fileNameLength,const QString& filename,const QByteArray& data)
+    QByteArray chunkPacker(uint32_t chunkIndex,uint32_t chunkAmount,uint8_t fileNameLength,const QByteArray& fileName,const QByteArray& data)
     {
         
         QByteArray msg;
-        uint8_t flag=0x01;
-        msg.append(static_cast<char>(flag));
-        msg.append(reinterpret_cast<const char*>(&index), sizeof(index));
-        msg.append(reinterpret_cast<const char*>(&chunkAmount), sizeof(chunkAmount));
+        msg.append(static_cast<char>(0x01));
+        
+        // 字节序转换：使用大端序发送
+        uint32_t beChunkIndex = qToBigEndian(chunkIndex);
+        uint32_t beChunkAmount = qToBigEndian(chunkAmount);
+        
+        msg.append(reinterpret_cast<const char*>(&beChunkIndex), sizeof(beChunkIndex));
+        msg.append(reinterpret_cast<const char*>(&beChunkAmount), sizeof(beChunkAmount));
         msg.append(static_cast<char>(fileNameLength));
-        msg.append(filename.toUtf8());
+        msg.append(fileName.left(fileNameLength));  // 确保不超过指定长度
         msg.append(data);
         return msg;
     }
@@ -41,16 +39,26 @@ public slots:
         QFile file(filepath);
         if(!file.open(QFile::ReadOnly))
             return;
-        int index = 0;
-        int chunkAmount = (file.size() + chunkSize - 1) / chunkSize;
+        int chunkIndex = 0;
+        int fileSize=file.size(),mainChunkAmount=fileSize/chunkSize;
+        int chunkAmount=mainChunkAmount+((fileSize-mainChunkAmount*chunkSize)>0?1:0);
         QString fileName = QFileInfo(filepath).fileName();
-        while(!file.atEnd())
+        QByteArray fileNameByteArr = fileName.toUtf8();
+        uint8_t fileNameBytes=fileNameByteArr.size();
+
+        qDebug() << "开始发送文件:" << fileName << "文件大小:" << fileSize 
+                 << "块大小:" << chunkSize << "总块数:" << chunkAmount;
+        
+        while(!file.atEnd()&&running)
         {
-            QByteArray singleChunk = file.read(chunkSize);
             QMetaObject::invokeMethod(manager,"sendByteArrayToPeer",Qt::QueuedConnection,Q_ARG(int,targetHostNum),
-                                      Q_ARG(const QByteArray&,filePacker(index,chunkAmount,fileName.size(),fileName,singleChunk)),Q_ARG(bool,singleChunk!=chunkAmount));
-            index++;
+                                      Q_ARG(const QByteArray&,chunkPacker(chunkIndex,chunkAmount,fileNameBytes,fileNameByteArr,file.read(chunkSize))),
+                                      Q_ARG(bool,chunkIndex!=chunkAmount-1));
+                                    //chunkIndex==chunkAmount-1 => 当前块为最后的块 => 发送完本chunk后暂无下个块待发 => false
+                                    //相反 != 则是只要不是最后一个chunk则预测'有'(true)下个event
+            chunkIndex++;
         }
+        qDebug() << "文件发送完成，已发送" << chunkIndex << "个块";
         emit fileSendFinish();
     }
 signals:

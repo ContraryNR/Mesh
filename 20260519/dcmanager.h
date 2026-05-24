@@ -98,7 +98,7 @@ public slots://(向内)链路聚合函数
     void addOutboundSpeed(int outs)
     {outboundSpeed+=outs;}
     void receivePeerMsg(int peerHostNum, const QString& msg)
-    {emit receiveStringMsg(peerHostNum, nameRoute.value(peerHostNum, QString("未知")), msg);}
+    {emit receiveStringMsg(peerHostNum, msg);}
 
 public slots://(向外)链路拆分函数
     void sendStringToPeer(int peerHostNum, const QString& msg)
@@ -150,7 +150,7 @@ signals:
     void sendOutboundSpeed(int);
     void peerAdded(int peerHostNum, const QString& peerHostName);
     void peerRemoved(int peerHostNum, const QString& peerHostName);
-    void receiveStringMsg(int peerHostNum, const QString& peerName, const QString& msg);
+    void receiveStringMsg(int peerHostNum, const QString& msg);
 };
 
 #endif // DCMANAGER_H

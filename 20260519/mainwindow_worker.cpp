@@ -50,6 +50,7 @@ MainWindow::MainWindow(QWidget *parent)
         ui->btnBroadcast->setEnabled(false);
         ui->btnAttach->setEnabled(false);
         ui->btnShut->setEnabled(false);
+        currentRow=-1;//需要重置为-1,否则如果停止组网前和再次组网后都只有一台主机则row和currentRow一直相等=>不触发ui更新
         cleanUp(false);
     });
 }
@@ -185,6 +186,8 @@ void MainWindow::cleanUp(bool isShutDown)
         else
             QMetaObject::invokeMethod(tunInWorker, "pasueInternalSessionFlood", Qt::QueuedConnection);
     }
+
+
 
     if(dcManager)
     {

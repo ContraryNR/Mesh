@@ -67,16 +67,19 @@ class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
-public://MainTrd
+public://WorkerInMainTrd
     tunloader* tunLoader{NULL};
     tunmanager* tunManager{NULL};
 
-public://QThread
+public://WorkerInQThread
     basenetworker* netWorker{NULL};
     dcmanager* dcManager{NULL};
     tuninworker* tunInWorker{NULL};
     tunoutworker* tunOutWorker{NULL};
     QThread* trd[4]{};
+
+public://WorkerInTmpQThread
+    QHash<filesender*,QThread*> fileSenderContanier;
 
 public://Flags
     bool isCoordinator;

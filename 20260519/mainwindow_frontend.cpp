@@ -1,8 +1,8 @@
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
 
-/*收信
-->当前选中该Peer->直接插入信息
+//收信
+/*->当前选中该Peer->直接插入信息
 ->当前未选中该Peer->插入信息到chatHistoryStringList下次切换到该Peer时插入全部聊天记录*/
 //创建bubble(label)容器=>获取布局指针=>添加bubble到容器=>基于消息来源确定'bubble'和'弹簧'的插入顺序从而在bubbleContanier实现行内定位
 //在chatListWidget中插入新item=>将上述单label容器设置为item内widget
@@ -29,12 +29,14 @@ void MainWindow::addChatBubble(QListWidget* listWidget, const QString& text, boo
     listWidget->scrollToBottom();
 }
 //检查hostNum是否存在=>存入QHash.chatStringList=>若来信主机正好为选中(当前)主机则插入消息气泡
+//依赖onPeerAdd和onPeerRemoved槽函数更新tableWidget
+//hostName从tableWidget获取
+//因此onPeerMsgReceived只需要接收hostNum从tableWidget进行查询即可
 void MainWindow::onPeerMsgReceived(int peerHostNum,const QString& msg)
 {
     if(!peerNames.contains(peerHostNum))
         return;
-    QString historyItem = QString("peer|%1").arg(msg);
-    peerChatHistory[peerHostNum].append(historyItem);
+    peerChatHistory[peerHostNum].append(QString("peer|%1").arg(msg));
     if(currentPeerHostNum == peerHostNum)
         addChatBubble(ui->chatListWidget, msg, false, false);
 }
@@ -74,7 +76,7 @@ void MainWindow::onPeerTableClicked(QTableWidgetItem* item)
         currentPeerHostNum = hostNumItem->text().toInt();
         QString peerName = peerNameItem->text();
         ui->chatTitle->setText(QString("与 %1 (%2) 的对话").arg(peerName).arg(currentPeerHostNum));
-        ui->btnAttach->setEnabled(true);//切换到有效聊天页面时开启文件发送按钮
+        ui->btnAttach->setEnabled(true);
         ui->btnSend->setEnabled(true);
         reloadChatHistory();
     }
@@ -87,17 +89,15 @@ void MainWindow::onAttachFile()
     if(!filePath.isEmpty())
     {
         ui->stateMsg->appendPlainText(QString("选中文件: %1").arg(filePath));
-        filesender* fileSender=new filesender(filePath);
-        QThread* trd=new QThread;
-        fileSender->moveToThread(trd);
-        trd->start();
+        filesender* fileSender;QThread* trd;
+        fileSenderContanier.insert(fileSender=new filesender(filePath),trd=new QThread);
+        fileSender->moveToThread(trd);trd->start();fileSender->running=true;
         QMetaObject::invokeMethod(fileSender,"sendFile",Qt::QueuedConnection,Q_ARG(void*,(void*)dcManager),Q_ARG(int,currentPeerHostNum));
         connect(fileSender,&filesender::fileSendFinish,this,[fileSender,trd](){
             fileSender->deleteLater();
-            trd->quit();//不wait应该也没关系 因为线程执行实体的终结取决于运行在其上的代码逻辑
-            //这里不wait主要是为了避免阻塞主线程
-        });//代码结束运行(run()返回)->QThread::finish()执行(包含finished信号发射)+线程执行实体终结+物理线程清理->wait()返回
-        connect(trd,&QThread::finished,trd,&QThread::deleteLater);//实际上run()返回时代码就已经停止运行 因此不wait而是依赖finished信号亦可
+            trd->quit();
+        });
+        connect(trd,&QThread::finished,trd,&QThread::deleteLater);
     }
 }
 /*###################################################################################################################*/
@@ -152,8 +152,7 @@ void MainWindow::goSendUnicastMsg()
     QMetaObject::invokeMethod(dcManager, "sendStringToPeer", Qt::QueuedConnection,
                               Q_ARG(int, currentPeerHostNum),
                               Q_ARG(const QString&, msg));
-    QString historyItem = QString("self|%1").arg(msg);
-    peerChatHistory[currentPeerHostNum].append(historyItem);
+    peerChatHistory[currentPeerHostNum].append(QString("self|%1").arg(msg));
     addChatBubble(ui->chatListWidget, msg, true, false);
     ui->sendingMsg->clear();
 }

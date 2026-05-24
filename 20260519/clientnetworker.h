@@ -50,8 +50,7 @@ public slots:
     void startTcpClient(const QString& ip,int port)
     {
         if(clientSocket&&clientSocket->isValid())
-            // clientSocket->abort();
-            clientSocket->disconnectFromHost();//改为disconnect确保server端能及时收到断连信息并触发disconnected槽函数
+            clientSocket->disconnectFromHost();
         if(!clientSocket)
         {
             clientSocket=new QTcpSocket;

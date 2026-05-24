@@ -13,9 +13,8 @@
 #include <QMutex>
 #include <QStack>
 #include <QMutexLocker>
-#include <QFile>
-#include <QDir>
 #include "rtc/rtc.hpp"
+#include "filereceiver.h"
 
 //128*1024=131072
 #define busySize 98304//*0.75(96KB)=>若最后一个包过大可能导致意外塞满
@@ -29,8 +28,7 @@ public://Flags
     std::atomic<bool> peerAlive{false},dcValid{false},isShuttingDown{false},isBufferBusy{false},newEventNow{false};
 public://Sources
     std::shared_ptr<rtc::PeerConnection> pc{NULL};
-    std::shared_ptr<rtc::DataChannel> dc{NULL};
-    QHash<QString,QHash<int,QByteArray>> fileContainer;
+    std::shared_ptr<rtc::DataChannel> dc{NULL};    
 public://Speed
     std::atomic<int> outboundSpeed=0;
     QTimer* outboundSpeedTimer{NULL};
@@ -43,6 +41,9 @@ public://Buffer
     QStack<QByteArray> pendingByteArrMsg;
 public://Mutex
     QMutex* inboundBufferMutex{NULL};
+public://fileReceiver
+    filereceiver* fr{nullptr};
+    QThread* frTrd{nullptr};
     dcworker(bool identity,int peerNum,std::vector<rtc::binary>& inBuffer,QMutex* mtx):isOfferER(identity),peerHostNum(peerNum),inboundBuffer(inBuffer),inboundBufferMutex(mtx)
     {
         processPendingTimer=new QTimer(this);
@@ -83,35 +84,6 @@ public://toolFunction
         candidateJson["target"]=peerHostNum;
         return candidateJson;
     }
-    void loadFile(const QString& fileName,int chunkIndex,int chunkAmount,const std::byte* begin,int size)
-    {
-        QHash<int,QByteArray>& singleFileContainer=fileContainer[fileName];
-        singleFileContainer.tryEmplace(chunkIndex,(const char*)begin,size);//指定键值对(key)存在时不尝试构造value(并更新value)
-        if(singleFileContainer.size()==chunkAmount)
-        {
-            //(循环前)只打开一次文件，循环内按顺序写入所有块
-            QFile file(QDir::currentPath() + "/" + fileName);
-            if (!file.open(QIODevice::WriteOnly))
-            {
-                qDebug()<<"文件打开失败";
-                return;
-            }
-            for(int i=0; i<chunkAmount; i++)
-            {
-                const QByteArray& singlePart = singleFileContainer[i];
-                qint64 bytesWritten = file.write(singlePart);
-                if (bytesWritten != singlePart.size())
-                {
-                    qDebug()<<"文件块写入不完整";
-                    file.close();
-                    return;
-                }
-            }
-            file.close();
-            qDebug()<<"文件接收完成:"<<fileName;
-            fileContainer.remove(fileName);//接受(写入)完成后从外层QHash移除该文件的QHash<int,QByteArray>容器
-        }
-    }
     void onDcMsg(std::variant<rtc::binary, rtc::string> message)
     {
         peerAlive.store(true, std::memory_order_relaxed);
@@ -129,32 +101,62 @@ public://toolFunction
             if (!size) return;
             emit sendInboundSpeed(size);
             if(!(uint8_t)binaryMsg[0])
-            {//目前dc.send()0号位flag只分0/1区分tunOutBinary和MainWindowOutBinary
+            {
                 QMutexLocker locker(inboundBufferMutex);
                 inboundBuffer.emplace_back(binaryMsg.begin()+1,binaryMsg.end());
             }
             else
             {
+                if(!fr)//使用跨线程阻塞等待 确保QThread线程归属正确的同时避免异步执行事件太晚导致将byteArray(chunk)投递到nullptr
+                    QMetaObject::invokeMethod(this,"startFileReceiver",Qt::BlockingQueuedConnection);
                 const std::byte* bp=binaryMsg.data()+1;
                 uint32_t chunkIndex;
-                std::memcpy(&chunkIndex,bp,4);
-                bp+=4;
+                std::memcpy(&chunkIndex,bp,4);bp+=4;
                 uint32_t chunkAmount;
-                std::memcpy(&chunkAmount,bp,4);
-                bp+=4;
+                std::memcpy(&chunkAmount,bp,4);bp+=4;
+                
+                // 字节序转换：发送端用大端序，接收端也要用大端序解析
+                chunkIndex = qFromBigEndian(chunkIndex);
+                chunkAmount = qFromBigEndian(chunkAmount);
+                
                 uint8_t fileNameLength;
-                std::memcpy(&fileNameLength,bp,1);
-                bp+=1;
-                std::byte* fileName=(std::byte*)malloc(fileNameLength);
-                memcpy(fileName,bp,fileNameLength);
-                //QString(fileName)->toUtf8()->QByteArray=本质是连续的std::byte=>接收端将连续的Utf8编码后的std::byte解码转回即可->fromUtf8()
-                QString filename=QString::fromUtf8(fileName);
+                std::memcpy(&fileNameLength,bp,1);bp+=1;
+                
+                // 验证文件名长度的有效性
+                if(fileNameLength == 0 || fileNameLength > 255)
+                {
+                    qDebug() << "无效的文件名长度:" << fileNameLength;
+                    return;
+                }
+                
+                std::byte* filename=(std::byte*)malloc(fileNameLength + 1);  // +1 用于终止符
+                memcpy(filename,bp,fileNameLength);
+                //不支持int或char向byte的强转
+                // filename[fileNameLength] = '\0';  // 添加字符串终止符
+                memset(filename+fileNameLength,0,1);
                 bp+=fileNameLength;
-                loadFile(filename,chunkIndex,chunkAmount,bp,binaryMsg.size()-(bp-binaryMsg.data()));
+                QString fileName=QString::fromUtf8((const char*)filename);
+                free(filename);
+                
+                // 添加调试日志
+                qDebug() << "解析文件块:" << fileName << "块索引:" << chunkIndex << "总块数:" << chunkAmount
+                         << "文件名长度:" << (int)fileNameLength
+                         << "数据大小:" << (binaryMsg.size() - (bp - binaryMsg.data()));
+                
+                if(!fr)return;//防止出现fr异步初始化来不及的问题
+                emit goReceiveFile(fileName,chunkIndex,chunkAmount,QByteArray(
+                (const char*)bp,binaryMsg.size()-(bp-binaryMsg.data())));
+                free(filename);
             }
         }
     }
 public slots:
+    void startFileReceiver()
+    {
+        (fr=new filereceiver)->moveToThread(frTrd=new QThread);
+        frTrd->start();fr->running=true;
+        connect(this,&dcworker::goReceiveFile,fr,&filereceiver::receiveFile);
+    }
     void processPenddingMsgStack()
     {
         newEventNow=false;//仅负责timerSlot执行期间的事件检查
@@ -190,7 +192,8 @@ public slots:
         while(!newEventNow&&
                 (!isBufferBusy)&&
                  (
-                     (!pendingStringMsg.isEmpty())&&(!pendingByteArrMsg.isEmpty()))
+                     (!pendingStringMsg.isEmpty())||(!pendingByteArrMsg.isEmpty()))
+                     //注意不要把"||"写反成"&&",否则两个pendingStack只要有一个空循环都只能跑一次
                  );
     }
     //注/虽然划分为两个sender函数 但是不需要互斥锁 因为异步投递的event最终只能同步执行
@@ -209,9 +212,8 @@ public slots:
                 dcValid = false;
             }
             if(dc->bufferedAmount()>busySize)
-                isBufferBusy=true;//每次send()写入缓冲区即更新isBusy
+                isBufferBusy=true;
         }
-        //字符串消息应该'基本上'不需要'predict'来提前调用(毕竟本来就不多而且pending消息中也是优先处理字符串消息)
     }
     void sendBinaryMsg(const QByteArray& msg,bool predictNextEvent)
     {
@@ -222,7 +224,7 @@ public slots:
             try
             {
                 dc->send((const rtc::byte*)msg.data(), msg.size());
-                outboundSpeed += msg.size();  // 统计出站速度
+                outboundSpeed += msg.size();
             } catch (const std::exception& e)
             {
                 qWarning() << "dc binary send failed:" << e.what();
@@ -350,7 +352,10 @@ public slots:
     void shutdown()
     {
         if (isShuttingDown.exchange(true)) return;
-
+        if(fr)
+            fr->running=false;
+        if(frTrd)
+            frTrd->quit();
         if(sendTimer)
         {
             if(sendTimer->isActive())
@@ -395,6 +400,13 @@ public slots:
             pc->close();
             pc.reset();
         }
+        if(frTrd)
+        {
+            frTrd->wait();
+            delete(frTrd);
+            frTrd=nullptr;
+            delete(fr);fr=nullptr;
+        }
         emit dcFinish();
     }
 signals:
@@ -403,5 +415,6 @@ signals:
     void sendInboundSpeed(int);
     void sendOutboundSpeed(int);
     void receiveStringMsg(int peerHostNum, const QString& msg);
+    void goReceiveFile(const QString& fileName,int chunkIndex,int chunkAmount,const QByteArray& chunk);
 };
 #endif
