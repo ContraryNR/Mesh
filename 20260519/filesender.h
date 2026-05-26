@@ -3,11 +3,9 @@
 #include <QObject>
 #include <QFile>
 #include <QFileInfo>
-#include "dcmanager.h"
+#include "dcworker.h"
 
-#define chunkSize 23592
-//busySize=104857 => remainSize=26214 =*0.9=>23592(23KB)(剩2.56KB)
-//确保dc缓冲区/就差一点(例如就差1b)达到busySize/时再进一个chunkPackage不会爆
+#define CHUNK_SIZE 23592
 
 class filesender : public QObject
 {
@@ -17,7 +15,7 @@ public:
     std::atomic<bool> running{false};
     filesender(const QString& file):filepath(file){}
 public:
-    QByteArray chunkPacker(uint32_t chunkIndex,uint32_t chunkAmount,uint8_t fileNameLength,const QByteArray& fileName,const QByteArray& data)
+    QByteArray chunkPacker(uint64_t chunkIndex,uint64_t chunkAmount,uint8_t fileNameLength,const QByteArray& fileName,const QByteArray& data)
     {
         
         QByteArray msg;
@@ -30,26 +28,27 @@ public:
         return msg;
     }
 public slots:
-    void sendFile(void* voidDcManager,int targetHostNum)
+    void sendFile(void* voidDcWorker)
     {
-        dcmanager* manager=(dcmanager*)voidDcManager;
+        dcworker* worker=(dcworker*)voidDcWorker;
         QFile file(filepath);
         if(!file.open(QFile::ReadOnly))
             return;
-        int chunkIndex = 0;
-        int fileSize=file.size(),mainChunkAmount=fileSize/chunkSize;
-        int chunkAmount=mainChunkAmount+((fileSize-mainChunkAmount*chunkSize)>0?1:0);
+        uint64_t chunkIndex = 0;
+        uint64_t fileSize=file.size();
+        uint64_t mainChunkAmount=fileSize/CHUNK_SIZE;
+        uint64_t chunkAmount=mainChunkAmount+((fileSize-mainChunkAmount*CHUNK_SIZE)>0?1:0);
         QString fileName = QFileInfo(filepath).fileName();
         QByteArray fileNameByteArr = fileName.toUtf8();
         uint8_t fileNameBytes=fileNameByteArr.size();
 
         qDebug() << "开始发送文件:" << fileName << "文件大小:" << fileSize 
-                 << "块大小:" << chunkSize << "总块数:" << chunkAmount;
+                 << "块大小:" << CHUNK_SIZE << "总块数:" << chunkAmount;
         
         while(!file.atEnd()&&running)
         {
-            QMetaObject::invokeMethod(manager,"sendByteArrayToPeer",Qt::QueuedConnection,Q_ARG(int,targetHostNum),
-                                      Q_ARG(const QByteArray&,chunkPacker(chunkIndex,chunkAmount,fileNameBytes,fileNameByteArr,file.read(chunkSize))),
+            QMetaObject::invokeMethod(worker,"sendBinaryMsg",Qt::QueuedConnection,
+                                      Q_ARG(const QByteArray&,chunkPacker(chunkIndex,chunkAmount,fileNameBytes,fileNameByteArr,file.read(CHUNK_SIZE))),
                                       Q_ARG(bool,chunkIndex!=chunkAmount-1));
                                     //chunkIndex==chunkAmount-1 => 当前块为最后的块 => 发送完本chunk后暂无下个块待发 => false
                                     //相反 != 则是只要不是最后一个chunk则预测'有'(true)下个event

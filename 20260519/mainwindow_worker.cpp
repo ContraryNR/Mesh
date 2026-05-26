@@ -9,6 +9,10 @@ MainWindow::MainWindow(QWidget *parent)
     initialSignaling();
     initialTun();
 
+    pendingStackTimer = new QTimer(this);
+    pendingStackTimer->setInterval(100);
+    connect(pendingStackTimer, &QTimer::timeout, this, &MainWindow::updatePendingStackSize);
+
     connect(ui->btnStart, &QPushButton::clicked, this, [this](){
         ui->btnStart->setEnabled(false);
         if(isCoordinator)
@@ -41,8 +45,10 @@ MainWindow::MainWindow(QWidget *parent)
             ui->stateMsg->appendPlainText(QString("正在连接协调者 %1:%2").arg(currentNetConf.ip).arg(currentNetConf.port));
         }
         ui->btnShut->setEnabled(true);
+        ui->btnSettings->setEnabled(true);
         if(dcManager)
             QMetaObject::invokeMethod(dcManager,"startTimer",Qt::QueuedConnection);
+        pendingStackTimer->start();
     });
 
     connect(ui->btnShut, &QPushButton::clicked, this, [this](){
@@ -50,7 +56,8 @@ MainWindow::MainWindow(QWidget *parent)
         ui->btnBroadcast->setEnabled(false);
         ui->btnAttach->setEnabled(false);
         ui->btnShut->setEnabled(false);
-        currentRow=-1;//需要重置为-1,否则如果停止组网前和再次组网后都只有一台主机则row和currentRow一直相等=>不触发ui更新
+        // ui->btnSettings->setEnabled(false);
+        currentRow=-1;
         cleanUp(false);
     });
 }
@@ -58,6 +65,7 @@ MainWindow::MainWindow(QWidget *parent)
 void MainWindow::initialSignaling()
 {
     (dcManager = new dcmanager(inboundBuffer, mutex))->moveToThread(trd[DC] = new QThread);
+    ipRoute=&(dcManager->ipRoute);
     connect(dcManager, &dcmanager::sendInboundSpeed, this, [this](int speed){
         if(speed / 1024 <= 1)
             ui->internalSpeed->setText(QString("入站: %1 B/s").arg(speed));
@@ -74,6 +82,11 @@ void MainWindow::initialSignaling()
         else
             ui->externalSpeed->setText(QString("出站: %1 MB/s").arg(speed /= 1024));
     });
+    connect(dcManager, &dcmanager::peerAdded, this, &MainWindow::onPeerAdded);
+    connect(dcManager, &dcmanager::peerRemoved, this, &MainWindow::onPeerRemoved);
+    connect(dcManager, &dcmanager::receiveStringMsg, this, &MainWindow::onPeerMsgReceived);
+    connect(dcManager,&dcmanager::informFileDownLoadFinish,this,&MainWindow::onFileDownLoadFinish);
+    connect(dcManager,&dcmanager::informFileDownLoadState,this,&MainWindow::onFileDownLoadState);
     trd[DC]->start();
 
     if(isCoordinator)
@@ -100,11 +113,6 @@ void MainWindow::initialSignaling()
             getTun();
         });
     }
-
-    connect(dcManager, &dcmanager::peerAdded, this, &MainWindow::onPeerAdded);
-    connect(dcManager, &dcmanager::peerRemoved, this, &MainWindow::onPeerRemoved);
-    connect(dcManager, &dcmanager::receiveStringMsg, this, &MainWindow::onPeerMsgReceived);
-
     netWorker->moveToThread(trd[NET] = new QThread);
     trd[NET]->start();
 }
@@ -176,6 +184,8 @@ void MainWindow::startTun()
 
 void MainWindow::cleanUp(bool isShutDown)
 {
+    pendingStackTimer->stop();
+
     if(tunOutWorker)
         tunOutWorker->sessionRunning = false;
 
@@ -187,7 +197,14 @@ void MainWindow::cleanUp(bool isShutDown)
             QMetaObject::invokeMethod(tunInWorker, "pasueInternalSessionFlood", Qt::QueuedConnection);
     }
 
-
+    if(fileSenderContanier.isEmpty())
+        for(auto beg=fileSenderContanier.begin();beg!=fileSenderContanier.end();beg++)
+        {
+            beg.key()->running=false;
+            beg.key()->deleteLater();
+            beg.value()->quit();//退出事件循环后
+            //QThread::finished->Container.remove()+deleteLater()
+        }
 
     if(dcManager)
     {
@@ -205,16 +222,16 @@ void MainWindow::cleanUp(bool isShutDown)
             QMetaObject::invokeMethod((servernetworker*)netWorker,"pauseTcpServer",Qt::QueuedConnection);
         else
             QMetaObject::invokeMethod((clientnetworker*)netWorker,"pauseTcpClient",Qt::QueuedConnection);
-    }//停止组网时一并释放tcp连接(1)避免不必要的资源占用(2)方便下次直接使用ui最新数据启动tcpNetWorker
+    }
 
     QTimer* waitTimer = new QTimer(this);
     waitTimer->setInterval(500);
 
     if(isShutDown)
     {
+        ipRoute=nullptr;
         connect(waitTimer, &QTimer::timeout, this, [this, waitTimer](){
-            bool dcDone = !dcManager || dcManager->ipRoute.isEmpty();
-            if(dcDone)
+            if((fileSenderContanier.isEmpty())&&(!dcManager || dcManager->ipRoute.isEmpty()))
             {
                 waitTimer->stop();
                 waitTimer->deleteLater();
@@ -233,34 +250,31 @@ void MainWindow::cleanUp(bool isShutDown)
                 if(tunOutWorker) { delete tunOutWorker; tunOutWorker = nullptr; }
                 if(dcManager) { delete dcManager; dcManager = nullptr; }
                 if(netWorker) { delete netWorker; netWorker = nullptr; }
-                //~networker => ~QObject =>~tcpServer =~children> ~tcpSocket
-                //其中server和socket的析构都不应涉及currentThreadData().tls.eventDispathcher故不必担心跨线程安全问题
                 delete mutex; mutex = nullptr;
                 QCoreApplication::quit();
             }
         });
-        waitTimer->start();
     }
     else
     {
         if(!isCoordinator&&netWorker)
             netWorker->localHostNum=0;
-        if(tunOutWorker)
-        {
-            connect(waitTimer,&QTimer::timeout,this,[this,waitTimer](){
-                if(!(tunOutWorker->floodFinish))
-                    return;
+        connect(waitTimer,&QTimer::timeout,this,[this,waitTimer](){
+            if(
+                (!dcManager||dcManager->ipRoute.isEmpty())&&
+                (fileSenderContanier.isEmpty())&&
+                (!tunOutWorker||(!(tunOutWorker->sessionRunning))))
+            {
+                ui->btnStart->setEnabled(true);
+                ui->stateMsg->appendPlainText("已退出组网");
                 waitTimer->stop();
                 waitTimer->deleteLater();
                 releaseTunResource();
                 ui->btnStart->setEnabled(true);
-            });
-            waitTimer->start();
-        }
-        else//针对Peer尚未分配到主机号的情况
-            ui->btnStart->setEnabled(true);
-        ui->stateMsg->appendPlainText("已退出组网");
+            }
+        });
     }
+    waitTimer->start();
 }
 
 void MainWindow::releaseTunResource()

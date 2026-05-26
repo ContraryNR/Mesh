@@ -43,6 +43,7 @@ void MainWindow::initialUI()
     connect(ui->btnBroadcast, &QPushButton::clicked, this, &MainWindow::goSendBroadcastMsg);
     connect(ui->peerTable, &QTableWidget::itemClicked, this, &MainWindow::onPeerTableClicked);
     connect(ui->btnAttach, &QPushButton::clicked, this, &MainWindow::onAttachFile);
+    connect(ui->btnSettings, &QPushButton::clicked, this, &MainWindow::onSettingsClicked);
     connect(ui->sendingMsg, &QLineEdit::returnPressed, this, [this](){
         if(ui->btnSend->isEnabled())
             goSendUnicastMsg();

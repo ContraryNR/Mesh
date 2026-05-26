@@ -88,6 +88,29 @@ public://Flags
     int currentPeerHostNum{0};
     int currentRow{-1};
 
+public://Timer
+    QTimer* pendingStackTimer{NULL};
+
+public://sending file track
+    class FileTransferInfo {
+    public:
+        QString fileName;
+        uint32_t fileSize;
+        QDateTime createTime;
+        bool chunkFinished;
+        FileTransferInfo(const QString& name,uint32_t size,const QDateTime& time,bool state):fileName(name),fileSize(size),createTime(time),chunkFinished(state){}
+    };
+    QHash<int, QVector<FileTransferInfo>> fileTransferHash;
+
+public://receiving file track
+    class FileReceiveInfo {
+    public:
+        QString fileName;
+        qreal progress;
+        FileReceiveInfo(const QString& name, qreal p): fileName(name), progress(p) {}
+    };
+    QHash<int, QVector<FileReceiveInfo>> fileReceiveHash;
+
 public://Sources
     WINTUN_ADAPTER_HANDLE adapter{NULL};
     WINTUN_SESSION_HANDLE session{NULL};
@@ -96,12 +119,15 @@ public://Sources
     netConfig currentNetConf;
     QHash<int, QString> peerNames;
     QHash<int, QStringList> peerChatHistory;
+    QHash<int,dcworker*>* ipRoute{nullptr};
 
 public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();;
     void initialUI();
     bool requestDialog(const QString&,const QString&,const QString&,const QString&);
+    void updateFileReceiveTable();
+
 
 public://uiGetterFunc
     netConfig getCoordinateNetConfigFromUI();
@@ -124,11 +150,17 @@ public slots:
     void goSendBroadcastMsg();
     void onPeerTableClicked(QTableWidgetItem* item);
     void onAttachFile();
+    void onSettingsClicked();
+    void updatePendingStackSize();
+    void onFileDownLoadFinish(const QString&,int);
+    void onFileDownLoadState(const QList<fileDownLoadState>&);
 
 private:
     void addChatBubble(QListWidget* listWidget, const QString& text, bool isSelf, bool isBroadcast);
     void reloadChatHistory();
     QString getCurrentPeerName();
+    void updateFileTransferTable();
+    QString formatFileSize(qint64 bytes);
 
 private:
     Ui::MainWindow *ui;

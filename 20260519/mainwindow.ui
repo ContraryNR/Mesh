@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>900</width>
+    <width>1200</width>
     <height>600</height>
    </rect>
   </property>
@@ -226,6 +226,13 @@
         </property>
        </widget>
       </item>
+      <item>
+       <widget class="QPushButton" name="btnSettings">
+        <property name="text">
+         <string>设置</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
     <item>
@@ -243,7 +250,7 @@
           <widget class="QTableWidget" name="peerTable">
            <property name="minimumSize">
             <size>
-             <width>300</width>
+             <width>250</width>
              <height>0</height>
             </size>
            </property>
@@ -367,6 +374,109 @@
         </item>
        </layout>
       </item>
+      <item>
+       <widget class="QGroupBox" name="fileTransferGroup">
+        <property name="title">
+         <string>文件传输</string>
+        </property>
+        <layout class="QVBoxLayout" name="fileTransferLayout">
+         <item>
+          <widget class="QTabWidget" name="fileTransferTabWidget">
+           <property name="currentIndex">
+            <number>0</number>
+           </property>
+           <widget class="QWidget" name="sendTab">
+            <attribute name="title">
+             <string>发送</string>
+            </attribute>
+            <layout class="QVBoxLayout" name="sendTabLayout">
+             <item>
+              <widget class="QTableWidget" name="fileTransferTable">
+               <property name="minimumSize">
+                <size>
+                 <width>300</width>
+                 <height>0</height>
+                </size>
+               </property>
+               <property name="editTriggers">
+                <set>QAbstractItemView::EditTrigger::NoEditTriggers</set>
+               </property>
+               <property name="alternatingRowColors">
+                <bool>true</bool>
+               </property>
+               <property name="selectionBehavior">
+                <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+               </property>
+               <column>
+                <property name="text">
+                 <string>文件名</string>
+                </property>
+               </column>
+               <column>
+                <property name="text">
+                 <string>大小</string>
+                </property>
+               </column>
+               <column>
+                <property name="text">
+                 <string>状态</string>
+                </property>
+               </column>
+               <column>
+                <property name="text">
+                 <string>创建时间</string>
+                </property>
+               </column>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+           <widget class="QWidget" name="receiveTab">
+            <attribute name="title">
+             <string>接收</string>
+            </attribute>
+            <layout class="QVBoxLayout" name="receiveTabLayout">
+             <item>
+              <widget class="QTableWidget" name="fileReceiveTable">
+               <property name="minimumSize">
+                <size>
+                 <width>300</width>
+                 <height>0</height>
+                </size>
+               </property>
+               <property name="editTriggers">
+                <set>QAbstractItemView::EditTrigger::NoEditTriggers</set>
+               </property>
+               <property name="alternatingRowColors">
+                <bool>true</bool>
+               </property>
+               <property name="selectionBehavior">
+                <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+               </property>
+               <column>
+                <property name="text">
+                 <string>文件名</string>
+                </property>
+               </column>
+               <column>
+                <property name="text">
+                 <string>来源</string>
+                </property>
+               </column>
+               <column>
+                <property name="text">
+                 <string>进度</string>
+                </property>
+               </column>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+          </widget>
+         </item>
+        </layout>
+       </widget>
+      </item>
      </layout>
     </item>
     <item>
@@ -388,6 +498,13 @@
           <widget class="QLabel" name="externalSpeed">
            <property name="text">
             <string>出站: --</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="pendingStackSize">
+           <property name="text">
+            <string>待发积压: --</string>
            </property>
           </widget>
          </item>
@@ -434,7 +551,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>900</width>
+     <width>1200</width>
      <height>21</height>
     </rect>
    </property>

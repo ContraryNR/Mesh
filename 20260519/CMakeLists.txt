@@ -44,7 +44,7 @@ qt_add_executable(20260519 WIN32 MANUAL_FINALIZATION ${PROJECT_SOURCES}
     tuninworker.h
     tunoutworker.h
     filesender.h
-    filereceiver.h
+    filedownloader.h
 )
 
 target_link_libraries(20260519

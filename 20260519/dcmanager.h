@@ -18,6 +18,8 @@ public:
     std::atomic<int> outboundSpeed=0;
     QTimer* sendSpeedTimer{NULL};
     QMutex* mutex{NULL};
+    int busySize=104857;
+    int freeSize=32768;
     dcmanager(std::vector<rtc::binary>& inBuffer,QMutex* mtx):inboundBuffer(inBuffer),mutex(mtx)
     {
         sendSpeedTimer=new QTimer(this);
@@ -29,17 +31,23 @@ public:
             outboundSpeed=0;
         });
     }
-public://basicFunc
+public:
     dcworker* addPeer(const QString& peerHostName,int peerHostNum,bool isOfferER)
     {
         nameRoute.insert(peerHostNum,peerHostName);
-        dcworker* worker=new dcworker(isOfferER,peerHostNum,inboundBuffer,mutex);
+        dcworker* worker=new dcworker(isOfferER,peerHostNum,inboundBuffer,mutex,busySize,freeSize);
         ipRoute.insert(peerHostNum,worker);
 
         connect(worker,&dcworker::transferMsg,this,&dcmanager::transferMsg);
         connect(worker, &dcworker::sendInboundSpeed, this, &dcmanager::addInboundSpeed);
         connect(worker, &dcworker::sendOutboundSpeed, this, &dcmanager::addOutboundSpeed);
         connect(worker, &dcworker::receiveStringMsg, this, &dcmanager::receivePeerMsg);
+        connect(worker,&dcworker::informFileDownLoadFinish,this,[this](const QString& fileName,int peerHostNum){
+            emit informFileDownLoadFinish(fileName,peerHostNum);
+        });
+        connect(worker,&dcworker::informFileDownLoadState,this,[this](const QList<fileDownLoadState>& stateList){
+            emit informFileDownLoadState(stateList);
+        });
 
         QThread* trd=new QThread;
         worker->moveToThread(trd);
@@ -61,7 +69,7 @@ public://basicFunc
         emit peerAdded(peerHostNum, peerHostName);
         return worker;
     }
-public slots://workerFunc
+public slots:
     void createOfferER(const QJsonArray& hostNameList,const QJsonArray& hostNumList)
     {
         int peerHostNum;
@@ -90,7 +98,7 @@ public slots://workerFunc
             QMetaObject::invokeMethod(worker,"setRemoteSdp",Qt::QueuedConnection,Q_ARG(const QString&,sdp),Q_ARG(const QString&,"answer"));
     }
 
-public slots://(向内)链路聚合函数
+public slots:
     void transferMsg(const QJsonObject& msg)
     {emit sendMsg(msg);}
     void addInboundSpeed(int ins)
@@ -99,38 +107,7 @@ public slots://(向内)链路聚合函数
     {outboundSpeed+=outs;}
     void receivePeerMsg(int peerHostNum, const QString& msg)
     {emit receiveStringMsg(peerHostNum, msg);}
-
-public slots://(向外)链路拆分函数
-    void sendStringToPeer(int peerHostNum, const QString& msg)
-    {
-        dcworker* worker = ipRoute.value(peerHostNum, nullptr);
-        if (worker)
-        {
-            worker->newEventNow=true;
-            QMetaObject::invokeMethod(worker, "sendStringMsg", Qt::QueuedConnection,
-                                      Q_ARG(const QString&, msg));
-        }
-    }
-    void sendByteArrayToPeer(int peerHostNum,const QByteArray& msg,bool predictNextEvent)
-    {
-        dcworker* worker = ipRoute.value(peerHostNum, nullptr);
-        if (worker)
-        {
-            worker->newEventNow=true;
-            QMetaObject::invokeMethod(worker, "sendBinaryMsg", Qt::QueuedConnection,
-                                      Q_ARG(const QByteArray&, msg),Q_ARG(bool,predictNextEvent));
-        }
-    }
-    void broadcastString(const QString& msg)
-    {
-        for (auto it = ipRoute.begin(); it != ipRoute.end(); ++it)
-        {
-            it.value()->newEventNow=true;
-            QMetaObject::invokeMethod(it.value(), "sendStringMsg", Qt::QueuedConnection,
-                                      Q_ARG(const QString&, msg));
-        }
-    }
-public slots://timerControlFunc
+public slots:
     void startTimer()
     {
         sendSpeedTimer->start();
@@ -144,6 +121,15 @@ public slots://timerControlFunc
         sendSpeedTimer->stop();
         delete(sendSpeedTimer);
     }
+public slots:
+    void updateAllDcWorkerSettings(int bSize, int fSize)
+    {
+        busySize = bSize;
+        freeSize = fSize;
+        for (auto it = ipRoute.begin(); it != ipRoute.end(); ++it)
+            QMetaObject::invokeMethod(it.value(), "updateSettings", Qt::QueuedConnection,
+                                      Q_ARG(int, bSize), Q_ARG(int, fSize));
+    }
 signals:
     void sendMsg(const QJsonObject&);
     void sendInboundSpeed(int);
@@ -151,6 +137,8 @@ signals:
     void peerAdded(int peerHostNum, const QString& peerHostName);
     void peerRemoved(int peerHostNum, const QString& peerHostName);
     void receiveStringMsg(int peerHostNum, const QString& msg);
+    void informFileDownLoadFinish(const QString& filename,int peerHostNum);
+    void informFileDownLoadState(const QList<fileDownLoadState>&);
 };
 
 #endif // DCMANAGER_H

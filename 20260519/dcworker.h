@@ -14,11 +14,22 @@
 #include <QStack>
 #include <QMutexLocker>
 #include "rtc/rtc.hpp"
-#include "filereceiver.h"
+#include "filedownloader.h"
 
-//128*1024=131072
-#define busySize 104857//*0.8(102KB)
-#define freeSize 32768//*0.25(32KB)=>若设置一个不够低的值可能很快又会达到busySize
+class fileDownLoadState
+{
+public:
+    QString filename;
+    int peerHostNum;
+    qreal progress;
+    fileDownLoadState(){}
+    fileDownLoadState(QString filename, int peerHostNum, qreal progress)
+        : filename(std::move(filename)), peerHostNum(peerHostNum),
+        progress(progress) {}
+    fileDownLoadState(const fileDownLoadState& oldOne)
+        :filename(oldOne.filename), peerHostNum(oldOne.peerHostNum),
+        progress(oldOne.progress) {}
+};
 
 class dcworker : public QObject
 {
@@ -31,7 +42,7 @@ public://Sources
     std::shared_ptr<rtc::DataChannel> dc{NULL};    
 public://Speed
     std::atomic<int> outboundSpeed=0;
-    QTimer* outboundSpeedTimer{NULL};
+    QTimer* basicTimer{NULL};
 public://QTimer
     QTimer* sendTimer{NULL},*detectTimer{NULL};
     QTimer* processPendingTimer{NULL};
@@ -41,19 +52,26 @@ public://Buffer
     QStack<QByteArray> pendingByteArrMsg;
 public://Mutex
     QMutex* inboundBufferMutex{NULL};
-public://fileReceiver
-    filereceiver* fr{nullptr};
-    QThread* frTrd{nullptr};
-    dcworker(bool identity,int peerNum,std::vector<rtc::binary>& inBuffer,QMutex* mtx):isOfferER(identity),peerHostNum(peerNum),inboundBuffer(inBuffer),inboundBufferMutex(mtx)
+public://fileDwnloader
+    QHash<QString,QPair<filedownloader*,QThread*>> fileContainer;
+public://Setting
+    std::atomic<int> busySize=104857;
+    std::atomic<int> freeSize=32768;
+    dcworker(bool identity,int peerNum,std::vector<rtc::binary>& inBuffer,QMutex* mtx,int bSize=104857,int fSize=32768):isOfferER(identity),peerHostNum(peerNum),inboundBuffer(inBuffer),inboundBufferMutex(mtx),busySize(bSize),freeSize(fSize)
     {
         processPendingTimer=new QTimer(this);
         processPendingTimer->setInterval(100);
         connect(processPendingTimer,&QTimer::timeout,this,&dcworker::processPenddingMsgStack);
-        outboundSpeedTimer = new QTimer(this);
-        outboundSpeedTimer->setInterval(1000);
-        connect(outboundSpeedTimer, &QTimer::timeout, this, [this](){
+        basicTimer = new QTimer(this);
+        basicTimer->setInterval(1000);
+        connect(basicTimer, &QTimer::timeout, this, [this](){
             emit sendOutboundSpeed(outboundSpeed);
             outboundSpeed = 0;
+            QList<fileDownLoadState> fileState;
+            for(auto& pr:fileContainer)
+                fileState.emplace_back(pr.first->fileName,peerHostNum,(qreal)(pr.first->writedChunkAmount)/(qreal)(pr.first->totalChunkAmount)*100);
+            if(!fileState.isEmpty())
+                emit informFileDownLoadState(fileState);
         });
     }
 public://toolFunction
@@ -107,42 +125,48 @@ public://toolFunction
             }
             else
             {
-                if(!fr)//使用跨线程阻塞等待 确保QThread线程归属正确的同时避免异步执行事件太晚导致将byteArray(chunk)投递到nullptr
-                    QMetaObject::invokeMethod(this,"startFileReceiver",Qt::BlockingQueuedConnection);
                 const std::byte* bp=binaryMsg.data()+1;
-                uint32_t chunkIndex;
-                std::memcpy(&chunkIndex,bp,4);bp+=4;
-                uint32_t chunkAmount;
-                std::memcpy(&chunkAmount,bp,4);bp+=4;                
+                uint64_t chunkIndex;
+                std::memcpy(&chunkIndex,bp,8);bp+=8;
+                uint64_t chunkAmount;
+                std::memcpy(&chunkAmount,bp,8);bp+=8;              
                 uint8_t fileNameLength;
                 std::memcpy(&fileNameLength,bp,1);bp+=1;
                 std::byte* filename=(std::byte*)malloc(fileNameLength);
                 std::memcpy(filename,bp,fileNameLength);bp+=fileNameLength;
                 QString fileName=QString::fromUtf8((const char*)filename,fileNameLength);
 
-                // // 添加调试日志 - 显示文件名原始字节
-                // QByteArray fileNameBytes((const char*)filename,fileNameLength);
-                // qDebug() << "解析文件块:" << fileName << "块索引:" << chunkIndex << "总块数:" << chunkAmount
-                //          << "文件名长度:" << (int)fileNameLength << "文件名字节:" << fileNameBytes.toHex()
-                //          << "数据大小:" << (binaryMsg.size() - (bp - binaryMsg.data()));
-                
-                emit goReceiveFile(fileName,chunkIndex,chunkAmount,QByteArray(
-                (const char*)bp,binaryMsg.size()-(bp-binaryMsg.data())));
+                if(!fileContainer.contains(fileName))
+                    QMetaObject::invokeMethod(this,"startSingleFileDownLoader",Qt::BlockingQueuedConnection,Q_ARG(const QString&,fileName),Q_ARG(uint64_t,chunkAmount));
+                QMetaObject::invokeMethod(fileContainer[fileName].first,"writeToChunkIndex",Qt::QueuedConnection,
+                                              Q_ARG(uint64_t,chunkIndex),
+                                              Q_ARG(const QByteArray&,QByteArray(
+                                                                            (const char*)bp,binaryMsg.size()-(bp-binaryMsg.data())
+                                                                            ))) ;
                 free(filename);
             }
         }
     }
 public slots:
-    void startFileReceiver()
+    void startSingleFileDownLoader(const QString& fileName,uint64_t chunkAmount)
     {
-        (fr=new filereceiver)->moveToThread(frTrd=new QThread);
-        frTrd->start();fr->running=true;
-        connect(this,&dcworker::goReceiveFile,fr,&filereceiver::receiveFile);
+        filedownloader* worker;QThread* trd;
+        fileContainer.insert(fileName,QPair<filedownloader*,QThread*>(worker=new filedownloader(fileName,chunkAmount),trd=new QThread));
+        connect(trd,&QThread::finished,trd,&QThread::deleteLater);
+        connect(worker,&filedownloader::fileWriteFinished,this,[this](const QString& filename){
+            emit informFileDownLoadFinish(filename,peerHostNum);
+            fileContainer[filename].second->quit();
+            fileContainer.remove(filename);
+        });
+        worker->moveToThread(trd);
+        trd->start();
+        worker->running = true;
     }
     void processPenddingMsgStack()
     {
-        newEventNow=false;//仅负责timerSlot执行期间的事件检查
-        do//每次调用必然至少取出一条消息并发送
+        newEventNow=false;
+        int binaryPktSize=0;
+        do
         {
             if(!isBufferBusy&&dc&&dc->isOpen()&&dcValid)
             {
@@ -151,13 +175,14 @@ public slots:
                     if(!pendingStringMsg.isEmpty())
                     {
                         dc->send(pendingStringMsg.top().toStdString());
-                        pendingStringMsg.pop();//先处理的总是最近(积压)的消息
+                        pendingStringMsg.pop();
                     }
                     else
                     {
-                        if(!pendingByteArrMsg.isEmpty())//仅当确定没有stringMsg(聊天消息)时才处理binaryMsg
+                        if(!pendingByteArrMsg.isEmpty())
                         {
-                            dc->send((const rtc::byte*)(pendingByteArrMsg.top().data()),pendingByteArrMsg.top().size());
+                            dc->send((const rtc::byte*)(pendingByteArrMsg.top().data()),binaryPktSize=pendingByteArrMsg.top().size());
+                            outboundSpeed += binaryPktSize;
                             pendingByteArrMsg.pop();
                         }
                     }
@@ -166,19 +191,12 @@ public slots:
                     qWarning() << "dc send failed:" << e.what();
                     dcValid = false;
                 }
-                //单次发送后更新isBusy状态
                 if(dc->bufferedAmount()>busySize)
                     isBufferBusy=true;
             }
         }
-        while(!newEventNow&&
-                (!isBufferBusy)&&
-                 (
-                     (!pendingStringMsg.isEmpty())||(!pendingByteArrMsg.isEmpty()))
-                     //注意不要把"||"写反成"&&",否则两个pendingStack只要有一个空循环都只能跑一次
-                 );
+        while(!newEventNow&&(!isBufferBusy)&&((!pendingStringMsg.isEmpty())||(!pendingByteArrMsg.isEmpty())));
     }
-    //注/虽然划分为两个sender函数 但是不需要互斥锁 因为异步投递的event最终只能同步执行
     void sendStringMsg(const QString& Msg)
     {
         if(isBufferBusy)
@@ -217,6 +235,11 @@ public slots:
         }
         if(!predictNextEvent)
             processPenddingMsgStack();
+    }
+    void updateSettings(int bSize, int fSize)
+    {
+        busySize = bSize;
+        freeSize = fSize;
     }
     void createDc()
     {
@@ -329,15 +352,19 @@ public slots:
     }
     void startOutBoundSpeedTimer()
     {
-        outboundSpeedTimer->start();
+        basicTimer->start();
     }
     void shutdown()
     {
         if (isShuttingDown.exchange(true)) return;
-        if(fr)
-            fr->running=false;
-        if(frTrd)
-            frTrd->quit();
+        if(!fileContainer.isEmpty())
+            for(auto& pr:fileContainer.values())
+            {
+                pr.first->running=false;
+                pr.first->deleteLater();
+                pr.second->quit();
+                pr.second->wait();
+            }
         if(sendTimer)
         {
             if(sendTimer->isActive())
@@ -359,12 +386,12 @@ public slots:
             processPendingTimer->deleteLater();
             processPendingTimer=nullptr;
         }
-        if(outboundSpeedTimer)
+        if(basicTimer)
         {
-            if(outboundSpeedTimer->isActive())
-                outboundSpeedTimer->stop();
-            outboundSpeedTimer->deleteLater();
-            outboundSpeedTimer=nullptr;
+            if(basicTimer->isActive())
+                basicTimer->stop();
+            basicTimer->deleteLater();
+            basicTimer=nullptr;
         }
         if(dc)
         {
@@ -382,13 +409,6 @@ public slots:
             pc->close();
             pc.reset();
         }
-        if(frTrd)
-        {
-            frTrd->wait();
-            delete(frTrd);
-            frTrd=nullptr;
-            delete(fr);fr=nullptr;
-        }
         emit dcFinish();
     }
 signals:
@@ -397,6 +417,7 @@ signals:
     void sendInboundSpeed(int);
     void sendOutboundSpeed(int);
     void receiveStringMsg(int peerHostNum, const QString& msg);
-    void goReceiveFile(const QString& fileName,int chunkIndex,int chunkAmount,const QByteArray& chunk);
+    void informFileDownLoadFinish(const QString& filename,int peerHostNum);
+    void informFileDownLoadState(const QList<fileDownLoadState>&);
 };
 #endif
