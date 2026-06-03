@@ -4,6 +4,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include "dcworker.h"
+#include "request.h"
+#include <QPointer>
 
 #define CHUNK_SIZE 23592
 
@@ -19,7 +21,7 @@ public:
     {
         
         QByteArray msg;
-        msg.append(static_cast<char>(0x01));
+        msg.append(static_cast<char>(0x02));
         msg.append(reinterpret_cast<const char*>(&chunkIndex), sizeof(chunkIndex));
         msg.append(reinterpret_cast<const char*>(&chunkAmount), sizeof(chunkAmount));
         msg.append(static_cast<char>(fileNameLength));
@@ -28,9 +30,9 @@ public:
         return msg;
     }
 public slots:
-    void sendFile(void* voidDcWorker)
+    void sendFile(dcworker* voidDcworker)
     {
-        dcworker* worker=(dcworker*)voidDcWorker;
+        QPointer<dcworker> worker((dcworker*)voidDcworker);
         QFile file(filepath);
         if(!file.open(QFile::ReadOnly))
             return;
@@ -47,19 +49,24 @@ public slots:
         
         while(!file.atEnd()&&running)
         {
-            QMetaObject::invokeMethod(worker,"sendBinaryMsg",Qt::QueuedConnection,
+            if(worker)
+            QMetaObject::invokeMethod(worker,"sendFileMsg",Qt::QueuedConnection,
                                       Q_ARG(const QByteArray&,chunkPacker(chunkIndex,chunkAmount,fileNameBytes,fileNameByteArr,file.read(CHUNK_SIZE))),
                                       Q_ARG(bool,chunkIndex!=chunkAmount-1));
                                     //chunkIndex==chunkAmount-1 => 当前块为最后的块 => 发送完本chunk后暂无下个块待发 => false
                                     //相反 != 则是只要不是最后一个chunk则预测'有'(true)下个event
+            else
+            {
+                emit fileSendStop(false);
+                return;//针对文件发送一半dcWorker销毁的情况
+            }
             chunkIndex++;
         }
         qDebug() << "文件发送完成，已发送" << chunkIndex << "个块";
-        emit fileSendFinish();
+        emit fileSendStop(true);
     }
 signals:
-    void fileSendFinish();
-
+    void fileSendStop(bool isFinish);
 signals:
 };
 

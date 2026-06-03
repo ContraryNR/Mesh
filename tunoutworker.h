@@ -19,11 +19,10 @@ public:
     tunoutworker(tunloader* loader):functionLoader(loader){}
 
 public slots:
-    void startExternalSessionFlood(void* voidSession,void* voidRoute)
+    void startExternalSessionFlood(void* voidSession,void* voidIpRoute)
     {
         floodFinish=false;
         WINTUN_SESSION_HANDLE session=(WINTUN_SESSION_HANDLE)voidSession;
-        QHash<int, dcworker*>* route=(QHash<int, dcworker*>*)voidRoute;
         HANDLE readEvent = functionLoader->GetReadWaitEvent(session);
         while (sessionRunning.ld)
         {
@@ -41,7 +40,7 @@ public slots:
                     uint32_t dstAddr;
                     std::memcpy(&dstAddr, packet + 16, sizeof(uint32_t));
                     int hostNum = ntohl(dstAddr) & 0xFF;
-                    dcworker* worker = route->value(hostNum, nullptr);
+                    dcworker* worker = getDcWorker(voidIpRoute,hostNum,0);
                     if (worker && worker->dc && worker->dc->isOpen())
                     {
                         try

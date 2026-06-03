@@ -13,14 +13,21 @@ netConfig MainWindow::getPeerNetConfigFromUI()
 
 void MainWindow::initialUI()
 {
-    bool ok;
-    QString name = QInputDialog::getText(this, "主机标识名设置",
-                                         "请输入您在此组网中的唯一名称:", QLineEdit::Normal, "", &ok);
-    if(!ok || name.trimmed().isEmpty())
-        name = QString("Host_%1").arg(QRandomGenerator::global()->bounded(1000, 9999));
-    localHostName = name.trimmed();
+    StartupDialog dlg(this);
+    if(dlg.exec() != QDialog::Accepted)
+    {
+        localHostName = QString("Host_%1").arg(QRandomGenerator::global()->bounded(1000, 9999));
+        isCoordinator = true;
+        onlineMode = true;
+    }
+    else
+    {
+        localHostName = dlg.getHostName();
+        isCoordinator = dlg.getIsCoordinator();
+        onlineMode = dlg.getOnlineMode();
+
+    }
     ui->hostNameDisplay->setText(localHostName);
-    isCoordinator = requestDialog("运行模式选择", "请选择运行模式", "Coordinator", "Peer");
     ui->modeDisplay->setText(isCoordinator ? "Coordinator" : "Peer");
     ui->coordinatorGroup->setVisible(isCoordinator);
     ui->peerGroup->setVisible(!isCoordinator);
@@ -44,9 +51,16 @@ void MainWindow::initialUI()
     connect(ui->peerTable, &QTableWidget::itemClicked, this, &MainWindow::onPeerTableClicked);
     connect(ui->btnAttach, &QPushButton::clicked, this, &MainWindow::onAttachFile);
     connect(ui->btnSettings, &QPushButton::clicked, this, &MainWindow::onSettingsClicked);
+    connect(ui->btnVideoChat, &QPushButton::clicked, this, &MainWindow::onStartVideoChat);
+    connect(ui->btnVoiceChat, &QPushButton::clicked, this, &MainWindow::onStartVoiceChat);
     connect(ui->sendingMsg, &QLineEdit::returnPressed, this, [this](){
         if(ui->btnSend->isEnabled())
             goSendUnicastMsg();
+    });
+    connect(ui->btnLoadJson, &QPushButton::clicked, this, [this](){
+        QString filePath = QFileDialog::getOpenFileName(this, "选择JSON文件", QDir::currentPath(), "JSON文件 (*.json)");
+        if(!filePath.isEmpty() && jsonLoader)
+            jsonLoader->loadJsonFile(filePath);
     });
 }
 bool MainWindow::requestDialog(const QString& title, const QString& text, const QString& btnText1, const QString& btnText0)

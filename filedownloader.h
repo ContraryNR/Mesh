@@ -49,6 +49,7 @@ public slots:
         file->seek(CHUNK_SIZE*chunkIndex);
         file->write(chunk);
         writedChunkAmount++;
+        emit fileWriteProgress(fileName,qreal(writedChunkAmount)/(qreal(totalChunkAmount)));
         if(writedChunkAmount==totalChunkAmount)
         {
             file->close();
@@ -58,6 +59,7 @@ public slots:
     }
 signals:
     void fileWriteFinished(const QString& filename);
+    void fileWriteProgress(const QString&,int);
 };
 
 #endif // FILEDOWNLOADER_H

@@ -233,6 +233,27 @@
         </property>
        </widget>
       </item>
+      <item>
+       <widget class="QPushButton" name="btnVoiceChat">
+        <property name="text">
+         <string>开始语音通话</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btnVideoChat">
+        <property name="text">
+         <string>开始视频通话</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btnLoadJson">
+        <property name="text">
+         <string>加载json文件</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </item>
     <item>
@@ -281,6 +302,11 @@
            <column>
             <property name="text">
              <string>状态</string>
+            </property>
+           </column>
+           <column>
+            <property name="text">
+             <string>连接数</string>
             </property>
            </column>
           </widget>

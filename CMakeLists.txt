@@ -1,20 +1,21 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(20260519 VERSION 0.1 LANGUAGES CXX)
+project(20260530 VERSION 0.1 LANGUAGES CXX)
 
 set(CMAKE_AUTOUIC ON)
-
 set(CMAKE_AUTOMOC ON)
-
 set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
-set(OPENSSL_ROOT_DIR "C:/msys64/mingw64")
-set(OPENSSL_USE_STATIC_LIBS TRUE)
-set(CMAKE_PREFIX_PATH "C:/msys64/mingw64" ${CMAKE_PREFIX_PATH})
+set(OpenCV_DIR "E:/opencv/opencv/build_mingw/install/x64/mingw/lib")
+find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
+
+set(OPENSSL_ROOT_DIR "C:/openssl-mingw")
+set(OPENSSL_USE_STATIC_LIBS FALSE)
 if(MINGW)
     add_compile_options(-Wno-error=format -Wno-format)
 endif()
@@ -30,27 +31,39 @@ set(PROJECT_SOURCES
     mainwindow_uifunc.cpp
     mainwindow.h
     mainwindow.ui
+    videochatwindow.h
+    videochatwindow.cpp
 )
 
-qt_add_executable(20260519 WIN32 MANUAL_FINALIZATION ${PROJECT_SOURCES}
+qt_add_executable(20260530 WIN32 MANUAL_FINALIZATION ${PROJECT_SOURCES}
     dcworker.h
     wintun.h
     tunloader.h
     tunmanager.h
     dcmanager.h
-    basenetworker.h
     servernetworker.h
     clientnetworker.h
     tuninworker.h
     tunoutworker.h
     filesender.h
     filedownloader.h
+    videoencoder.h
+    videodecoder.h
+    peerjsonworker.h
+    coorjsonworker.h
+    basejsonworker.h
+    jsonloader.h
+    netconfig.h
+    settingsdialog.h
+    startupdialog.h
+    request.h
 )
 
-target_link_libraries(20260519
+target_link_libraries(20260530
     PRIVATE
         Qt6::Widgets
         Qt6::Network
+        ${OpenCV_LIBS}
         datachannel
         ws2_32
         iphlpapi
@@ -59,6 +72,5 @@ target_link_libraries(20260519
         mswsock
         strmiids
         uuid
-
 )
-qt_finalize_executable(20260519)
+qt_finalize_executable(20260530)

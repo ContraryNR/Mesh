@@ -1,0 +1,89 @@
+#ifndef VIDEOENCODER_H
+#define VIDEOENCODER_H
+
+#include <QObject>
+#include <QDebug>
+#include <QDateTime>
+#include <QDataStream>
+#include <QIODevice>
+#include <QTimer>
+#include <QImage>
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/videoio.hpp>
+
+class videoencoder : public QObject
+{
+    Q_OBJECT
+public:
+    int fps;
+    uint64_t startTime;
+    QTimer* floodTimer{nullptr};
+    cv::VideoCapture* cam;//id传0打开系统默认摄像头
+
+    videoencoder(int cameraId=0,int frameWidth=640,int frameHeight=480,int FPS=15):cam(new cv::VideoCapture(cameraId)),fps(FPS),floodTimer(new QTimer(this))
+    {
+        if(cam->isOpened())
+        {
+            //设置采集帧的宽/高
+            cam->set(cv::CAP_PROP_FRAME_WIDTH, frameWidth);
+            cam->set(cv::CAP_PROP_FRAME_HEIGHT, frameHeight);
+            cam->set(cv::CAP_PROP_FPS, fps);
+            floodTimer->setInterval((int)(1000/fps));
+            connect(floodTimer,&QTimer::timeout,this,&videoencoder::encodedFlood);
+            qDebug()<<"摄像头已打开 cameraId="<<cameraId<<" 分辨率="<<frameWidth<<"x"<<frameHeight;
+        }
+        else
+            qDebug()<<"[ERROR] 摄像头打开失败 cameraId="<<cameraId;
+    }
+
+    void encodedFlood()
+    {
+        //未编码Mat
+        cv::Mat frame;
+        cam->read(frame);
+        if(frame.empty())
+        {
+            qDebug() << "[WARN] 摄像头帧捕获失败";
+            return;
+        }
+
+        std::vector<uchar> buffer;
+        //预期文件扩展名 未编码图像对象 输出缓冲区 质量(关键key+参数value)
+        cv::imencode(".jpg", frame, buffer, {cv::IMWRITE_JPEG_QUALITY, 50});//编码并存储到buffer中
+        QByteArray encodedResult;
+        QDataStream packetStream(&encodedResult, QIODevice::WriteOnly);
+        packetStream<<(uint8_t)(0x04);
+        encodedResult.append((const char*)(buffer.data()),buffer.size());
+        //必须深拷贝:frame是栈上局部变量 函数返回后QImage会变成悬挂指针
+        QImage localImg(frame.data, frame.cols, frame.rows, frame.step, QImage::Format_BGR888);
+        emit sendEncodedFrame(localImg.copy(),encodedResult);
+        //rawFrame->QImage->videoSession.localImage rawFrame->enCodedFrame->binaryMsg->dc.send()
+    }
+
+public slots:
+    void startFloodTimer()
+    {floodTimer->start();}
+    void shutdown()
+    {
+        if(floodTimer)
+        {
+            if(floodTimer->isActive())
+                floodTimer->stop();
+            floodTimer->deleteLater();
+            floodTimer = nullptr;
+        }
+        if(cam)
+        {
+            if(cam->isOpened())
+                cam->release();//不release的话其他软件也用不了同一摄像头
+            delete cam;
+            cam = nullptr;
+        }
+    }
+
+signals:
+    void sendEncodedFrame(const QImage&,const QByteArray&);
+};
+
+#endif // VIDEOENCODER_H
