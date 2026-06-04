@@ -10,11 +10,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 
-set(OpenCV_DIR "E:/opencv/opencv/build_mingw/install/x64/mingw/lib")
+set(OpenCV_DIR "E:/Code/Dependency/opencv/install/x64/mingw/lib")
 find_package(OpenCV REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-set(OPENSSL_ROOT_DIR "C:/openssl-mingw")
+set(OPENSSL_ROOT_DIR "E:/Code/Dependency/openssl")
 set(OPENSSL_USE_STATIC_LIBS FALSE)
 if(MINGW)
     add_compile_options(-Wno-error=format -Wno-format)
