@@ -337,7 +337,8 @@ public slots://startDeCoderSlot
     {
         (videoDeCoder=new videodecoder)->moveToThread(deCoderTrd=new QThread);
         connect(videoDeCoder,&videodecoder::sendDecodedFrame,this,[this](const QImage& frameImg){
-            emit transferDecodedFrame(frameImg,peerHostNum);
+            if(isVideoCalling)
+                emit transferDecodedFrame(frameImg,peerHostNum);
         });
         deCoderTrd->start();
     }
@@ -347,11 +348,13 @@ public slots://startDeCoderSlot
         audioCallChannelCount = ch;
         (audioDeCoder=new audiodecoder(sr,ch))->moveToThread(audioDeCoderTrd=new QThread);
         connect(audioDeCoder,&audiodecoder::sendDecodedAudio,this,[this](const QByteArray& pcmData){
-            emit transferDecodedAudio(pcmData,peerHostNum);
+            if(isAudioCalling)
+                emit transferDecodedAudio(pcmData,peerHostNum);
         });
         connect(audioDeCoder, &audiodecoder::sendDecodedAudioLevel, this,
                 [this](int level){
-            emit transferDecodedAudioLevel(level, peerHostNum);
+            if(isAudioCalling)
+                emit transferDecodedAudioLevel(level, peerHostNum);
         });
         connect(audioDeCoderTrd,&QThread::finished,audioDeCoderTrd,&QThread::deleteLater);
         audioDeCoderTrd->start();
