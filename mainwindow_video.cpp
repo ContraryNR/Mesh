@@ -165,9 +165,6 @@ void MainWindow::shutVideoSession(int peerHostNum)
     if(!checkVeNecessity())
         if(videoEnCoder)
             cleanupVideoSessionPipeline();
-    //audioPlayer=>audioChatWindow/videoChatWindow
-    //两种window分别嵌入"audioSink+ioDevice"音频播放功能
-    //=>这边不再检查音频管线是否不必要并移除
     if(!checkAeNecessity())
         if(audioCapture)
             cleanupAudioSessionPipeline();
