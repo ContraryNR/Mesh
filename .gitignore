@@ -1,0 +1,35 @@
+# build
+build/
+build-*/
+
+# Qt Creator
+*.pro.user
+*.pro.user.*
+*.qbs.user
+.qtcreator/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# compiler
+*.o
+*.obj
+*.exe
+*.dll
+
+# vscode
+.vscode/
+
+# idea
+.idea/
+
+# logs
+*.log
+
+# debug
+dbg_report.h
+ninja_output.txt
+node_version.txt
