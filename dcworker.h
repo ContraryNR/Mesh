@@ -535,20 +535,6 @@ public slots://sendSlot
                         else
                             if(processPendingTimer->isActive())
                                 processPendingTimer->stop();//避免不必要空转
-                        //分析一下问题
-                        //remainBinaryMsg=getBinaryMsg() + while(...&&remainBinaryMsg)
-                        //预期应该是在获取一次binaryMsg后判断下次是否可能还有信息要发(是否pendingContanier为空)
-                        //但这里有两方面的问题
-                        //(1)getBinary的返回值没有被立刻使用=>这意味着此时tempByteArrayPtr*这个指针指向的byteArray内存并没有被更新
-                        //结果就是发送的 要么是无效数据(初始化时)(几乎不可能发生) 要么就是不久前发送过一次的'旧'数据 ★
-                        //(2)processPenddingMsg这个函数的调用源有两个大类
-                        //1.每次发送binaryMsg后通过predictNext预测接下来短时间内是否还有数据包,若无则可利用短暂间隙消费pendingMsg
-                        //2.每100ms发射一次timeour信号的processPendingTimer 目的是即便上游(MainWindow)总是投递binaryMsg到worker也总能至少对pendingMsg消费一次 避免积压数据'饿死' ★
-                        //而在本例(现在是2026/6/7/16:12/)中观察到的'Peer切块完成后',"Peer的出站网速和Coor的入站网速"始终稳定在200KB/S
-                        //而且还能观察到文件接收端(Coor)的日志结尾出现大量连续的'尾块'重复输出(do中读取旧byteArray+timer高频触发) 这就是上述两个★所致
-                        //修改建议
-                        //(1)processPendingTimer的信号发射频率考虑在运行时动态修改
-                        //(2)每次getBinaryMsg返回后其返回值必须立刻看作msgIsValid判断(不再作为remainBinaryMsg仅用于判断是否还残余pendingMsg待处理)
                         state.pressure=(pendingTun?pendingTun->size():0)+(pendingFile?pendingFile->size():0)
                         +(pendingAudio?pendingAudio->size():0)+(pendingFrame?pendingFrame->size():0);
                     }
@@ -607,15 +593,10 @@ public slots://bootSlot
                     dc->setBufferedAmountLowThreshold(freeSize);
                     dc->onBufferedAmountLow([this](){
                         isBufferBusy=false;
-                        //processer->stop()与此非强关联 降到freeSize和剩余pending量有关但没有必然关系
-                        //(但是降到freeSize大概率是没有pendingMsg了倒是真的,因为缓冲区总量下降证明上游生产速度小于下游消费速度
-                        //而从理论上来讲下游消费速度不可能大于上游生产速度 因为上游是直接读取连续内存内已经存放的msg而下游和网络链路质量直接相关且本身也存在一定上限)
-                        //但总的来讲从语义上来看 stop还是放在判断pendingContainer为空的位置比较好
                     });
                     dc->onMessage([this](std::variant<rtc::binary, rtc::string> message){
                         onDcMsg(message);
                     });
-                    // QMetaObject::invokeMethod(this,"startProcessPendingStackTimer",Qt::QueuedConnection);
                     dc->onClosed([this](){
                         dcValid=false;
                         QMetaObject::invokeMethod(this, "shutdown", Qt::QueuedConnection);
@@ -641,15 +622,14 @@ public slots://runningTimeSlot
                 for(const auto& c : pendingCandidates)
                     pc->addRemoteCandidate(rtc::Candidate(c.first.toStdString(),c.second.toStdString()));
                 pendingCandidates.clear();
-                if(description.type()==rtc::Description::Type::Offer) {
+                if(description.type()==rtc::Description::Type::Offer)
                     pc->setLocalDescription();
-                }
-            } else {
-                qWarning() << "[DC] State check FAILED!";
             }
-        } else {
-            qWarning() << "[DC] setRemoteSdp: pc is null or sdp is empty!";
+            else
+                qWarning() << "[DC] State check FAILED!";
         }
+        else
+            qWarning() << "[DC] setRemoteSdp: pc is null or sdp is empty!";
     }
     void receiveCandidate(const QString &sdp, const QString &mediaType){
         if(pc&&!sdp.isNull()&&!mediaType.isNull()) {
@@ -660,7 +640,8 @@ public slots://runningTimeSlot
                 pc->addRemoteCandidate(rtc::Candidate(sdp.toStdString(), mediaType.toStdString()));
             else
                 pendingCandidates.append(qMakePair(sdp,mediaType));
-        } else {
+        } else
+        {
             qWarning() << "[DC] receiveCandidate: pc is null or params are null!";
         }
     };
@@ -774,7 +755,6 @@ signals:
     void informFileDownLoadFinish(const QString& filename,int peerHostNum);
     void transferDecodedFrame(const QImage&,int);
     void transferDecodedAudio(const QByteArray& pcmData,int peerHostNum);
-    //(新增)对端每帧解码后的相对音量 0~100 -> 由 dcmanager 透传给 mainwindow 弹窗
     void transferDecodedAudioLevel(int level,int peerHostNum);
     void transferRequest(uint8_t msgType,uint64_t requestTime,const QJsonObject& callParams,void* voidDCWorker);
     void returnRequestResult(uint64_t requestTime,bool result);

@@ -78,6 +78,18 @@ TopBaseDialog
 - **移除** 已废弃的 `audioDeCoder` 字段，解码器由 `dcworker` 按需创建
 
 ### 健壮性与修复
+
+#### HangUp/Frame 数据竟态修复（关键）
+**问题**：发送 HangUp 消息前，已有连续的视频帧在传输管道中 in-flight。HangUp 到达对端更新 `isVideoCalling=false` 后，之前已进入 decoder 队列的帧仍在解码并向上回溯（dcworker → dcmanager → MainWindow），`MainWindow::onDecodedFrame` 无条件的初始化新的 `VideoChatWindow` 和 `VideoEncoder`，导致"挂断后幽灵回拨"。
+
+**修复方案**：在 **dcworker 层**（上游）做双层拦截：
+- 入站拦截：`onDcMsg(TYPE_VIDEO)` 入口检查 `isVideoCalling`，通话结束后丢弃剩余帧
+- 出站拦截：`videodecoder::sendDecodedFrame` 信号的 `transferDecodedFrame` 发射前再次检查 `isVideoCalling`
+- 音频同理：`TYPE_AUDIO` 入站 + `sendDecodedAudio` / `sendDecodedAudioLevel` 出站均做 `isAudioCalling` 守卫
+
+**对比**：该方案在 dcworker 层（最上游）解决，而非在 MainWindow 层新增 `QSet<int>` 维护每路通话状态。避免了额外容器引入导致的逻辑膨胀和潜在的状态同步开销。
+
+#### 其他修复
 - `QHash::operator[]` re-insert 守卫：`dcFinish`、`Logger` 初始化路径中的隐式插入修复
 - 跨线程 `delete` 修复：严格遵循 `quit()` → `wait()` → `delete` 顺序
 - `dcmanager::setWorkerCallingState` 中的取反条件修复
