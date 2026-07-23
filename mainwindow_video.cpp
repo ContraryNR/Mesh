@@ -140,7 +140,7 @@ void MainWindow::cleanupVideoChatSession(int peerHostNum)
     QString peerName = peerNames.value(peerHostNum, "未知");
     ui->stateMsg->appendPlainText(QString("与 %1 的视频通话已结束").arg(peerName));
 }
-//5.当(生产者)videoEncoder不存在任何消费者videoChatWindow时销毁encoder
+//5.当生产者(videoEncoder+audioCapture/audioEncoder)无下游消费者时销毁相应管线
 void MainWindow::cleanupVideoSessionPipeline()
 {
     if(videoEnCoder)
