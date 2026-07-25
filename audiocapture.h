@@ -11,7 +11,6 @@
 #include <QMediaDevices>
 #include <QThread>
 #include <cmath>
-#include "logger.h"
 #define noiseGateHold 8//噪声门打开后保持发送的帧数(20ms/帧,8帧≈160ms),防止尾音截断
 //audioSource(源/生产) => audioencoder(中继管线/消费) =待编码的PCM帧(若干采样点)=> audioEncoder
 

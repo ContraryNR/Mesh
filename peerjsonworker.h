@@ -4,7 +4,6 @@
 #include "basejsonworker.h"
 #include <QJsonArray>
 #include <QDebug>
-#include "logger.h"
 
 class peerjsonworker : public basejsonworker
 {

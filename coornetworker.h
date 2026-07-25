@@ -10,7 +10,6 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QDebug>
-#include "logger.h"
 
 class coornetworker : public QObject
 {

@@ -7,7 +7,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDebug>
-#include "logger.h"
 
 class peernetworker : public QObject
 {

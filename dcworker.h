@@ -18,7 +18,6 @@
 #include "filedownloader.h"
 #include "videodecoder.h"
 #include "audiodecoder.h"
-#include "logger.h"
 
 //全局类型标识(统一用于: 二进制消息协议首字节 / worker索引 / purpose参数 / 协商子类型)
 #define TYPE_NEGOTIATE  0   //协商(文件/音频/视频请求与响应)

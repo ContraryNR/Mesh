@@ -62,8 +62,6 @@ public:
         dcworker* worker=new dcworker(isOfferER,peerHostNum,index,inboundBuffer,mutex,busySize,freeSize);
         ipRoute[peerHostNum].append(worker);
 
-        // emit peerConnectionAmountChanged(peerHostNum,ipRoute[peerHostNum].size());
-
         connect(worker,&dcworker::sendSignalingMsg,this,[this](const QJsonObject& msg){
             emit transferWorkerMsg(msg);
         });
@@ -267,7 +265,6 @@ signals:
     void informFileDownLoadFinish(const QString& filename,int peerHostNum);
     void transferDecodedFrame(const QImage&,int);
     void transferDecodedAudio(const QByteArray&,int);
-    //(新增)对端音频帧解码后的相对音量透传给 mainwindow
     void transferDecodedAudioLevel(int level,int peerHostNum);
     void peerConnectionAmountChanged(int peerHostNum,int currentConnectAmount);
     void workerStatePulse(int ibs,int obs,int pr,const QList<fileDownLoadState>&);

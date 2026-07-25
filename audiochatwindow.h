@@ -8,7 +8,6 @@
 #include <QPushButton>
 #include <QVector>
 #include "audioplayer.h"
-#include "logger.h"
 
 class QPaintEvent;
 class AudioLevelBar : public QWidget

@@ -6,7 +6,6 @@
 #include <QJsonArray>
 #include <QDebug>
 #include <QTcpSocket>
-#include "logger.h"
 #include "util.h"
 
 class coorjsonworker : public basejsonworker
@@ -67,7 +66,6 @@ public slots:
             int baseHostNum=hashHostNameToHostNum(hostName);
             QSet<int> occupied=occupiedHostNums();
             int distributedHostNum=resolveHostNumCollision(baseHostNum,occupied);
-            //立刻统计现有hostNum(nameRoute.values()并检查是否有重复)
 
             nameToNumMap[hostName]=distributedHostNum;
             if(numToSocketMap && socket)
