@@ -6,7 +6,6 @@
 #include <QDir>
 #include <QHash>
 #include <QSet>
-#include "logger.h"
 #define CHUNK_SIZE 23592
 
 class filedownloader : public QObject

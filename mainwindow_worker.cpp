@@ -54,9 +54,7 @@ MainWindow::MainWindow(QWidget *parent)
                 ui->stateMsg->appendPlainText(QString("正在连接协调者 %1:%2").arg(currentNetConf.ip).arg(currentNetConf.port));
             }
             else
-            {
                 QMetaObject::invokeMethod(peerJsonWorker,"onReadySendHostName",Qt::QueuedConnection);
-            }
         }
         ui->btnShut->setEnabled(true);
         ui->btnSettings->setEnabled(true);
@@ -109,7 +107,6 @@ void MainWindow::initialSignaling()
             ui->stateMsg->appendPlainText(QString("json文件加载失败: %1, 错误: %2").arg(filePath).arg(errorMsg));
         });
     }
-
     if(isCoordinator)
     {
         (serverNetWorker = new coornetworker(localHostName,localHostNum))->moveToThread(trd[NET]=new QThread);
@@ -134,7 +131,6 @@ void MainWindow::initialSignaling()
     {
         (clientNetWorker = new peernetworker)->moveToThread(trd[NET]=new QThread);
         (peerJsonWorker=new peerjsonworker(localHostName, localHostNum, dcManager->nameRoute, onlineMode,ipRoute))->moveToThread(trd[JW]=new QThread);
-
         connect(peerJsonWorker, &peerjsonworker::goCreateOfferER, dcManager, &dcmanager::createOfferER);
         connect(peerJsonWorker, &peerjsonworker::goCreateAnswerER, dcManager, &dcmanager::createAnswerER);
         connect(peerJsonWorker, &peerjsonworker::goSetAnswer, dcManager, &dcmanager::setAnswer);

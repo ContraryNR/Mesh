@@ -7,19 +7,17 @@
 
 #define maxWorkerGroupSize 4
 //worker index: 0=>主通道(TUN/字符串/协商) 1=>文件传输 2=>音频(暂未实现) 3=>视频通话
-//TYPE_*宏仅用于消息协议头和purpose参数,与workerGroup中的index解耦
+//TYPE_*宏仅用于消息协议头和purpose参数,与workerGroup中的index无关
 
 class dcmanager : public QObject
 {
     Q_OBJECT
 public:
+    bool onlineMode;
     QHash<int,QString> nameRoute;
     QHash<int,QVector<dcworker*>> ipRoute;
     QHash<QPair<int,int>, QVector<QPair<QString,QString>>> candidateBuffer;
-    bool onlineMode;
-    // candidate 缓冲: worker 不存在时暂存, 创建后自动刷新
-    //逻辑上可能缓冲在jsonWorker会好一点 但是放在dcManager确实可以避免回溯
-    //(不然得在jsonWorker先判断worker是否为空然后创建时还得等dcManager发通知)
+    //worker(answerER)仅在sdp(offer)到来时创建=>若candidate先于sdp到达则需等待worker创建完毕并setRemoteSdp后方可addCandidate
     std::vector<rtc::binary>& inboundBuffer;
     QTimer* basicTimer{nullptr};
     QMutex* mutex{NULL};
@@ -45,8 +43,6 @@ public:
             emit workerStatePulse(ibs,obs,pr,allState);
         });        
     }
-
-    //peerHostName不用默认参(QString())也行=>上游显式判断是否存在有效peerHostName(非worker0不传hostName)
     dcworker* addPeer(const QString& peerHostName,int peerHostNum,bool isOfferER)
     {
         if(!nameRoute.contains(peerHostNum)&&(!peerHostName.isEmpty()))
@@ -104,6 +100,7 @@ public:
 
         QThread* trd=new QThread;
         worker->moveToThread(trd);
+        QMetaObject::invokeMethod(worker,"initialPendingProcessTimer",Qt::QueuedConnection);
         connect(worker,&dcworker::dcFinish,this,[worker,trd,peerHostNum,this,index](){
             trd->quit();
             trd->wait();
@@ -133,7 +130,7 @@ public:
 public slots://signalingSlot
     //jsonWorker解析出initialOffer建立初始worker0走createOfferER槽函数
     //settingDialog走getExtraConnection槽函数间接调用addPeer而不是createOfferER
-    void createOfferER(const QString& peerHostName,int peerHostNum)//=>只负责初始dc建立
+    void createOfferER(const QString& peerHostName,int peerHostNum)//=>只负责初始dc建立(指"已在线host对新加入host建立的worker0)
     {
         if(nameRoute.contains(peerHostNum))
             return;
@@ -141,14 +138,10 @@ public slots://signalingSlot
     }
     void createAnswerER(const QString& peerHostName,int peerHostNum,const QString& offer,int index)
     {
-        dcworker* currentWorker;
+        dcworker* currentWorker{nullptr};
         //(1)判断是否已加入(基于workerGrpSize) (2)判断字符串是否为空(基于对方index是否为0)
         if(!nameRoute.contains(peerHostNum)&&(!peerHostName.isEmpty()))
-        {
             currentWorker=addPeer(peerHostName,peerHostNum,false);
-            if(currentWorker)
-                QMetaObject::invokeMethod(currentWorker,"setRemoteSdp",Qt::QueuedConnection,Q_ARG(const QString&,offer),Q_ARG(const QString&,"offer"));
-        }
         else
         {
             if(index>=maxWorkerGroupSize)return;
@@ -157,21 +150,12 @@ public slots://signalingSlot
                 //根据对方worker的index创建连续的直到同index的worker
                 addPeer(peerHostName,peerHostNum,false);
             if(index < ipRoute[peerHostNum].size())
-            {
                 currentWorker=ipRoute[peerHostNum][index];
-                if(currentWorker)
-                    QMetaObject::invokeMethod(currentWorker,"setRemoteSdp",Qt::QueuedConnection,Q_ARG(const QString&,offer),Q_ARG(const QString&,"offer"));
-            }
         }
-
         //初始连接offer/连接补齐完成后当前offer=>对应的worker
-        //连接补齐的非投递目标的worker与此无关
-        //只有answerER可能存在candidate投递到'pcState!=0'或'!worker'的情况
-        //不需要放在addPeer统一执行
-
-        //你收到的如果是answer,那你必然已经有了对应的offerER=>此前不会缓冲candidate
-        //你收到的如果是offer,这种情况下才不确定是否有对应的answerER=>此前可能缓冲candidate
-
+        //连接补齐的非投递目标(index不匹配者)的worker与此无关
+        if(currentWorker)
+            QMetaObject::invokeMethod(currentWorker,"setRemoteSdp",Qt::QueuedConnection,Q_ARG(const QString&,offer),Q_ARG(const QString&,"offer"));
         // flush该 worker 缓冲的 candidate
         QPair<int,int> bufKey(peerHostNum,index);
         if(candidateBuffer.contains(bufKey))
@@ -202,9 +186,7 @@ public slots://connectionExtensionSlot
     {
         int currentSize=ipRoute[peerHostNum].size();
         for(int i=0;i<targetAmount-currentSize;i++)
-        {
             addPeer(QString(),peerHostNum,true);
-        }
     }
     void releaseExtraConnection(int targetAmount,int peerHostNum)
     {

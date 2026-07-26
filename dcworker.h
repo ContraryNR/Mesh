@@ -126,9 +126,6 @@ public:
                 break;
             }
         }
-        processPendingTimer=new QTimer(this);
-        processPendingTimer->setInterval(100);
-        connect(processPendingTimer,&QTimer::timeout,this,&dcworker::processPenddingMsg);
     }
 
 public://toolFunction
@@ -316,7 +313,7 @@ public://dc.OnMsg.CALLBACK
                     QJsonDocument doc=QJsonDocument::fromJson(QByteArray((char*)(bp),binaryMsg.size()-1));
                     if(doc.isObject())
                         emit signalingBackUp(doc.object());
-                        //针对两Peer间已经存在初始连接(dcworkerIndex=0)情况下复用tcpSignaling逻辑到dc
+                        //针对两Peer间已经存在初始连接(dcworkerIndex=0)情况下复用tcpSignaling逻辑到dc(仅限离线状态,在线状态仍然走tcp)
                             //即dc0收到的信息转发到jsonworker复用networker的解析后逻辑
                         //发信
                             //SettingsDialog::applyConnectionCount=>dcmanager=>dcworker::createDc
@@ -386,8 +383,14 @@ public slots://startFileDownLoadSlot
         trd->start();
         worker->running = true;
     }
-
-public://sendFunctionRefaction
+public slots://timerInitialSlot
+    void initialPendingProcessTimer()
+    {
+        processPendingTimer=new QTimer(this);
+        processPendingTimer->setInterval(100);
+        connect(processPendingTimer,&QTimer::timeout,this,&dcworker::processPenddingMsg);
+    }
+public://sendFunctionRefactor
     void sendMsg(const QString& Msg)
     {
         if(dc&&dc->isOpen()&&dcValid)
@@ -541,10 +544,6 @@ public slots://sendSlot
         }
         while(!newEventNow&&!isBufferBusy&&msgIsValid);
     }
-public slots://timerSlot
-    void startProcessPendingStackTimer()
-    {processPendingTimer->start();}
-
 public slots://bootSlot
     void createDc()
     {
@@ -574,8 +573,6 @@ public slots://bootSlot
                 dc->onMessage([this](std::variant<rtc::binary, rtc::string> message){
                     onDcMsg(message);
                 });
-                //初始不开启 仅当繁忙时开启 避免不必要空转
-                // QMetaObject::invokeMethod(this,"startProcessPendingStackTimer",Qt::QueuedConnection);
                 dc->onClosed([this](){
                     dcValid=false;
                     QMetaObject::invokeMethod(this, "shutdown", Qt::QueuedConnection);
@@ -631,18 +628,17 @@ public slots://runningTimeSlot
             qWarning() << "[DC] setRemoteSdp: pc is null or sdp is empty!";
     }
     void receiveCandidate(const QString &sdp, const QString &mediaType){
-        if(pc&&!sdp.isNull()&&!mediaType.isNull()) {
+        if(pc&&!sdp.isNull()&&!mediaType.isNull())
+        {
             //远端offerER传递offer/candidate=>本地dcManager收到offer/candidate=>addPeer创建answerER并返回dcworker*
             //=>异步投递setRemoteSdp事件
-
             if(remoteDescSet)
                 pc->addRemoteCandidate(rtc::Candidate(sdp.toStdString(), mediaType.toStdString()));
             else
                 pendingCandidates.append(qMakePair(sdp,mediaType));
-        } else
-        {
-            qWarning() << "[DC] receiveCandidate: pc is null or params are null!";
         }
+        else
+            qWarning() << "[DC] receiveCandidate: pc is null or params are null!";
     };
 
 public slots://heartbeatSlot
